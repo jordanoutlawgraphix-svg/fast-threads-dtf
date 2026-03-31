@@ -1,0 +1,20 @@
+=== Cleaning up temp files ===
+rm '.env.local'
+rm 'git_error.txt'
+rm 'git_output.txt'
+rm 'setup_git.bat'
+[master cce7ae8] Add gitignore and clean up temp files
+ 5 files changed, 6 insertions(+), 10 deletions(-)
+ delete mode 100644 .env.local
+ create mode 100644 .gitignore
+ rename git_error.txt => finalize_err.txt (100%)
+ rename git_output.txt => finalize_out.txt (100%)
+ delete mode 100644 setup_git.bat
+=== Checking for gh CLI ===
+gh CLI not found. Trying with git remote...
+remote: Repository not found.
+fatal: repository 'https://github.com/jordantollakson/fast-threads-dtf.git/' not found
+=== RESULT ===
+origin	https://github.com/jordantollakson/fast-threads-dtf.git (fetch)
+origin	https://github.com/jordantollakson/fast-threads-dtf.git (push)
+DONE

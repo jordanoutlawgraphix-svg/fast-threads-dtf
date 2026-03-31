@@ -1,0 +1,6 @@
+node_modules/
+.next/
+.env.local
+*.bat
+*_output.txt
+*_error.txt

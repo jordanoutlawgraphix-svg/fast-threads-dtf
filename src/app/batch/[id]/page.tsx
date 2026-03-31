@@ -2,7 +2,10 @@
 
 import { useState, useEffect, use } from 'react'
 import * as store from '@/lib/store'
-import { Batch, BatchItem, JobItem, JobSubmission, PLACEMENT_LABELS } from '@/types'
+import { Batch, BatchItem, JobItem, JobSubmission, PLACEMENT_LABELS, DEFAULT_GANG_SHEET_CONFIG } from '@/types'
+import { layoutGangSheetOptimized, PrintItem } from '@/lib/gang-sheet-engine'
+import { downloadGangSheetPNG } from '@/lib/gang-sheet-export'
+import { downloadBatchSummaryPDF } from '@/lib/summary-pdf'
 
 type EnrichedBatchItem = BatchItem & { job_item: JobItem; job: JobSubmission }
 
@@ -10,31 +13,83 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const { id } = use(params)
   const [batch, setBatch] = useState<Batch | null>(null)
   const [batchItems, setBatchItems] = useState<EnrichedBatchItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
-    const b = store.getBatch(id)
-    if (b) {
-      setBatch(b)
-      setBatchItems(store.getBatchItems(id))
-    }
+    loadData()
   }, [id])
 
-  const markAsPrinting = () => {
-    store.updateBatchStatus(id, 'printing')
+  const loadData = async () => {
+    setLoading(true)
+    const [b, items] = await Promise.all([store.getBatch(id), store.getBatchItems(id)])
+    setBatch(b)
+    setBatchItems(items)
+    setLoading(false)
+  }
+
+  const markAsPrinting = async () => {
+    await store.updateBatchStatus(id, 'printing')
     setBatch(prev => prev ? { ...prev, status: 'printing' } : null)
   }
 
-  const markAsPrinted = () => {
-    store.updateBatchStatus(id, 'printed')
+  const markAsPrinted = async () => {
+    await store.updateBatchStatus(id, 'printed')
     setBatch(prev => prev ? { ...prev, status: 'printed' } : null)
   }
 
-  const markAsComplete = () => {
-    store.updateBatchStatus(id, 'complete')
+  const markAsComplete = async () => {
+    await store.updateBatchStatus(id, 'complete')
     setBatch(prev => prev ? { ...prev, status: 'complete' } : null)
-    // Update all jobs in this batch
     const jobIds = new Set(batchItems.map(bi => bi.job.id))
-    jobIds.forEach(jid => store.updateJobStatus(jid, 'complete'))
+    await Promise.all(Array.from(jobIds).map(jid => store.updateJobStatus(jid, 'complete')))
+  }
+
+  const handleDownloadGangSheet = async () => {
+    if (!batch) return
+    setExporting(true)
+    try {
+      // Rebuild the layout from batch items
+      const printItems: PrintItem[] = []
+      const imageUrls: Record<string, string> = {}
+      const seen = new Set<string>()
+
+      for (const bi of batchItems) {
+        if (seen.has(bi.job_item_id)) continue
+        seen.add(bi.job_item_id)
+
+        const count = batchItems.filter(x => x.job_item_id === bi.job_item_id).length
+        const filePath = bi.job_item.file_path
+        if (filePath) {
+          imageUrls[bi.job_item_id] = store.getFileUrl(filePath)
+        }
+
+        printItems.push({
+          id: bi.job_item_id,
+          width_inches: Number(bi.job_item.target_width_inches),
+          height_inches: Number(bi.job_item.target_height_inches),
+          quantity: count,
+          label: `#${bi.job.invoice_number} | ${PLACEMENT_LABELS[bi.job_item.placement]} | ${bi.job_item.garment_age}`,
+          invoice_number: bi.job.invoice_number,
+        })
+      }
+
+      const layout = layoutGangSheetOptimized(printItems, batch.batch_number, DEFAULT_GANG_SHEET_CONFIG)
+      await downloadGangSheetPNG(layout, { renderImages: true, imageUrls })
+    } catch (err) {
+      console.error('Export failed:', err)
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  const handleDownloadPDF = () => {
+    if (!batch) return
+    downloadBatchSummaryPDF(batch, batchItems)
+  }
+
+  if (loading) {
+    return <div className="text-center py-12 text-gray-500">Loading batch...</div>
   }
 
   if (!batch) {
@@ -53,16 +108,6 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     groupedByInvoice[inv].push(item)
   }
 
-  // Deduplicate by job_item_id (since batch items are expanded by quantity in the gang sheet)
-  const uniqueItems: Record<string, { item: EnrichedBatchItem; count: number }> = {}
-  for (const bi of batchItems) {
-    if (!uniqueItems[bi.job_item_id]) {
-      uniqueItems[bi.job_item_id] = { item: bi, count: 1 }
-    } else {
-      uniqueItems[bi.job_item_id].count++
-    }
-  }
-
   return (
     <div>
       {/* Screen-only header */}
@@ -74,11 +119,17 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
               Created {new Date(batch.created_at).toLocaleString()} | {batch.total_items} total prints
             </p>
           </div>
-          <div className="flex gap-3">
-            <button
-              onClick={() => window.print()}
-              className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 text-sm"
-            >
+          <div className="flex flex-wrap gap-2">
+            <button onClick={handleDownloadGangSheet} disabled={exporting}
+              className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-medium disabled:opacity-50">
+              {exporting ? 'Exporting...' : 'Download Gang Sheet PNG'}
+            </button>
+            <button onClick={handleDownloadPDF}
+              className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-500 text-sm">
+              Download Summary PDF
+            </button>
+            <button onClick={() => window.print()}
+              className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 text-sm">
               Print Summary
             </button>
             {batch.status === 'ready' && (
@@ -152,7 +203,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                   </thead>
                   <tbody>
                     {Array.from(seen.values()).map(({ item, count }) => {
-                      const thumbUrl = store.getFileUrl(item.job_item.file_url)
+                      const thumbUrl = item.job_item.file_path ? store.getFileUrl(item.job_item.file_path) : null
                       return (
                         <tr key={item.job_item_id} className="border-b border-gray-200">
                           <td className="py-2">

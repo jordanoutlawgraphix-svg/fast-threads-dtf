@@ -13,9 +13,13 @@ export default function Dashboard() {
     printedBatches: 0,
     totalItemsPrinted: 0,
   })
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    setStats(store.getStats())
+    store.getStats().then(s => {
+      setStats(s)
+      setLoading(false)
+    })
   }, [])
 
   return (
@@ -24,12 +28,12 @@ export default function Dashboard() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
-        <StatCard label="Total Jobs" value={stats.totalJobs} />
-        <StatCard label="Pending" value={stats.pendingJobs} color="yellow" />
-        <StatCard label="Total Batches" value={stats.totalBatches} />
-        <StatCard label="Ready to Print" value={stats.readyBatches} color="blue" />
-        <StatCard label="Printed" value={stats.printedBatches} color="green" />
-        <StatCard label="Items Printed" value={stats.totalItemsPrinted} color="green" />
+        <StatCard label="Total Jobs" value={stats.totalJobs} loading={loading} />
+        <StatCard label="Pending" value={stats.pendingJobs} color="yellow" loading={loading} />
+        <StatCard label="Total Batches" value={stats.totalBatches} loading={loading} />
+        <StatCard label="Ready to Print" value={stats.readyBatches} color="blue" loading={loading} />
+        <StatCard label="Printed" value={stats.printedBatches} color="green" loading={loading} />
+        <StatCard label="Items Printed" value={stats.totalItemsPrinted} color="green" loading={loading} />
       </div>
 
       {/* Quick Actions */}
@@ -67,7 +71,7 @@ export default function Dashboard() {
   )
 }
 
-function StatCard({ label, value, color = 'gray' }: { label: string; value: number; color?: string }) {
+function StatCard({ label, value, color = 'gray', loading }: { label: string; value: number; color?: string; loading: boolean }) {
   const colorClasses: Record<string, string> = {
     gray: 'bg-gray-900 border-gray-800',
     yellow: 'bg-yellow-900/20 border-yellow-800/50',
@@ -78,7 +82,7 @@ function StatCard({ label, value, color = 'gray' }: { label: string; value: numb
 
   return (
     <div className={`rounded-lg border p-4 ${colorClasses[color]}`}>
-      <p className="text-2xl font-bold">{value}</p>
+      <p className="text-2xl font-bold">{loading ? '—' : value}</p>
       <p className="text-xs text-gray-400 mt-1">{label}</p>
     </div>
   )

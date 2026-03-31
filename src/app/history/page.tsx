@@ -2,22 +2,51 @@
 
 import { useState, useEffect } from 'react'
 import * as store from '@/lib/store'
-import { Batch, PLACEMENT_LABELS } from '@/types'
+import { Batch, BatchItem, JobItem, JobSubmission, PLACEMENT_LABELS } from '@/types'
 import Link from 'next/link'
+
+type EnrichedBatchItem = BatchItem & { job_item: JobItem; job: JobSubmission }
 
 export default function HistoryPage() {
   const [batches, setBatches] = useState<Batch[]>([])
+  const [batchItemsMap, setBatchItemsMap] = useState<Record<string, EnrichedBatchItem[]>>({})
   const [filter, setFilter] = useState<'all' | 'printed' | 'complete'>('all')
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     refreshData()
   }, [filter])
 
-  const refreshData = () => {
-    let allBatches = store.getBatches()
-    if (filter === 'printed') allBatches = allBatches.filter(b => b.status === 'printed')
-    else if (filter === 'complete') allBatches = allBatches.filter(b => b.status === 'complete')
-    setBatches(allBatches.sort((a, b) => b.batch_number - a.batch_number))
+  const refreshData = async () => {
+    setLoading(true)
+    const statusFilter = filter === 'all' ? undefined : filter
+    const allBatches = await store.getBatches(statusFilter as any)
+
+    // For history, show all statuses when filter is 'all', otherwise filter
+    let filtered = allBatches
+    if (filter === 'printed') filtered = allBatches.filter(b => b.status === 'printed')
+    else if (filter === 'complete') filtered = allBatches.filter(b => b.status === 'complete')
+
+    setBatches(filtered)
+
+    // Load batch items for each batch
+    const itemsMap: Record<string, EnrichedBatchItem[]> = {}
+    await Promise.all(
+      filtered.map(async (batch) => {
+        const items = await store.getBatchItems(batch.id)
+        itemsMap[batch.id] = items
+      })
+    )
+    setBatchItemsMap(itemsMap)
+    setLoading(false)
+  }
+
+  const statusColors: Record<string, string> = {
+    building: 'bg-yellow-500/20 text-yellow-300',
+    ready: 'bg-blue-500/20 text-blue-300',
+    printing: 'bg-purple-500/20 text-purple-300',
+    printed: 'bg-green-500/20 text-green-300',
+    complete: 'bg-gray-500/20 text-gray-300',
   }
 
   return (
@@ -41,7 +70,9 @@ export default function HistoryPage() {
         </div>
       </div>
 
-      {batches.length === 0 ? (
+      {loading ? (
+        <div className="text-center py-12 text-gray-500">Loading...</div>
+      ) : batches.length === 0 ? (
         <div className="text-center py-12 text-gray-500 bg-gray-900 border border-gray-800 rounded-lg">
           <p className="text-lg mb-2">No batches found</p>
           <p className="text-sm">Completed batches will appear here for historical reference.</p>
@@ -49,15 +80,8 @@ export default function HistoryPage() {
       ) : (
         <div className="space-y-3">
           {batches.map(batch => {
-            const batchItems = store.getBatchItems(batch.id)
+            const batchItems = batchItemsMap[batch.id] || []
             const invoiceNumbers = [...new Set(batchItems.map(bi => bi.job.invoice_number))]
-            const statusColors: Record<string, string> = {
-              building: 'bg-yellow-500/20 text-yellow-300',
-              ready: 'bg-blue-500/20 text-blue-300',
-              printing: 'bg-purple-500/20 text-purple-300',
-              printed: 'bg-green-500/20 text-green-300',
-              complete: 'bg-gray-500/20 text-gray-300',
-            }
 
             return (
               <Link
@@ -74,7 +98,7 @@ export default function HistoryPage() {
                       </span>
                     </div>
                     <p className="text-sm text-gray-400 mt-1">
-                      {batch.total_items} prints | Invoices: {invoiceNumbers.join(', ')}
+                      {batch.total_items} prints{invoiceNumbers.length > 0 ? ` | Invoices: ${invoiceNumbers.join(', ')}` : ''}
                     </p>
                     {batchItems.length > 0 && (
                       <div className="flex flex-wrap gap-2 mt-2">

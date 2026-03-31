@@ -52,8 +52,8 @@ export interface JobItem {
   garment_age: GarmentAge
   quantity: number
   original_filename: string
-  file_url: string
-  thumbnail_url: string | null
+  file_path: string
+  thumbnail_path: string | null
   // Source file dimensions (pixels)
   source_width_px: number
   source_height_px: number

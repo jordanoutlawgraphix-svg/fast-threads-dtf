@@ -1,12 +1,34 @@
 'use client'
 
-import { useState } from 'react'
-import { DEFAULT_SIZE_PROFILES, PLACEMENT_LABELS, DEFAULT_GANG_SHEET_CONFIG, SizeProfile } from '@/types'
+import { useState, useEffect } from 'react'
+import { DEFAULT_SIZE_PROFILES, PLACEMENT_LABELS, DEFAULT_GANG_SHEET_CONFIG, SizeProfile, GangSheetConfig } from '@/types'
+import * as store from '@/lib/store'
 
 export default function AdminPage() {
   const [profiles, setProfiles] = useState(DEFAULT_SIZE_PROFILES)
   const [config, setConfig] = useState(DEFAULT_GANG_SHEET_CONFIG)
   const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    loadSettings()
+  }, [])
+
+  const loadSettings = async () => {
+    setLoading(true)
+    try {
+      const [configData, profilesData] = await Promise.all([
+        store.getSetting<GangSheetConfig>('gang_sheet_config'),
+        store.getSetting<SizeProfile[]>('size_profiles'),
+      ])
+      if (configData) setConfig(configData)
+      if (profilesData) setProfiles(profilesData)
+    } catch {
+      // Use defaults if settings table doesn't exist yet
+    }
+    setLoading(false)
+  }
 
   const updateProfile = (index: number, field: string, value: number) => {
     setProfiles(prev => {
@@ -17,11 +39,25 @@ export default function AdminPage() {
     setSaved(false)
   }
 
-  const handleSave = () => {
-    // In production, this saves to Supabase
-    // For now, it's just in-memory
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await Promise.all([
+        store.saveSetting('gang_sheet_config', config),
+        store.saveSetting('size_profiles', profiles),
+      ])
+
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2000)
+    } catch (err) {
+      console.error('Failed to save settings:', err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return <div className="text-center py-12 text-gray-500">Loading settings...</div>
   }
 
   return (
@@ -159,9 +195,10 @@ export default function AdminPage() {
       <div className="flex justify-end">
         <button
           onClick={handleSave}
-          className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium"
+          disabled={saving}
+          className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-medium disabled:opacity-50"
         >
-          {saved ? 'Saved!' : 'Save Settings'}
+          {saving ? 'Saving...' : saved ? 'Saved!' : 'Save Settings'}
         </button>
       </div>
     </div>

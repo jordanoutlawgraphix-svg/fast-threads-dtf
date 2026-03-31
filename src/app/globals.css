@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+:root {
+  --ft-orange: #f97316;
+  --ft-dark: #1a1a2e;
+  --ft-gray: #374151;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  .print-only {
+    display: block !important;
+  }
+}
+
+.print-only {
+  display: none;
+}

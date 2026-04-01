@@ -71,7 +71,8 @@ export default function SubmitJobPage() {
     if (isPDF(file)) {
       try {
         processedFile = await convertPDFToImage(file)
-      } catch {
+      } catch (err) {
+        console.error('PDF conversion error:', err)
         setError('Failed to convert PDF. Make sure it contains at least one page.')
         return
       }

@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, use } from 'react'
+import { useState, useEffect, use, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import * as store from '@/lib/store'
 import { Batch, BatchItem, JobItem, JobSubmission, PLACEMENT_LABELS, DEFAULT_GANG_SHEET_CONFIG } from '@/types'
 import { layoutGangSheetOptimized, PrintItem } from '@/lib/gang-sheet-engine'
@@ -15,6 +16,8 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const [batchItems, setBatchItems] = useState<EnrichedBatchItem[]>([])
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
+  const [dissolving, setDissolving] = useState(false)
+  const router = useRouter()
 
   useEffect(() => {
     loadData()
@@ -36,6 +39,22 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const markAsPrinted = async () => {
     await store.updateBatchStatus(id, 'printed')
     setBatch(prev => prev ? { ...prev, status: 'printed' } : null)
+  }
+
+  const handleDissolveBatch = async () => {
+    if (!batch) return
+    if (!confirm(`Un-batch Batch #${batch.batch_number}? All items will return to the unbatched queue.`)) return
+    setDissolving(true)
+    try {
+      const ok = await store.dissolveBatch(id)
+      if (ok) {
+        router.push('/batch')
+      }
+    } catch (err) {
+      console.error('Dissolve failed:', err)
+    } finally {
+      setDissolving(false)
+    }
   }
 
   const markAsComplete = async () => {
@@ -132,6 +151,12 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
               className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 text-sm">
               Print Summary
             </button>
+            {batch.status !== 'complete' && (
+              <button onClick={handleDissolveBatch} disabled={dissolving}
+                className="px-4 py-2 bg-red-800 text-red-200 rounded-lg hover:bg-red-700 text-sm border border-red-700 disabled:opacity-50">
+                {dissolving ? 'Un-batching...' : 'Un-batch'}
+              </button>
+            )}
             {batch.status === 'ready' && (
               <button onClick={markAsPrinting} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm">
                 Start Printing

@@ -145,6 +145,38 @@ export async function createBatchItems(items: Omit<BatchItem, 'created_at'>[]): 
   return true
 }
 
+export async function dissolveBatch(batchId: string): Promise<boolean> {
+  // Get batch items so we can reset job statuses
+  const { data: batchItems } = await supabase
+    .from('batch_items')
+    .select('job_item_id, job_items(job_id)')
+    .eq('batch_id', batchId)
+
+  // Delete batch items first (FK constraint)
+  const { error: itemsErr } = await supabase.from('batch_items').delete().eq('batch_id', batchId)
+  if (itemsErr) { console.error('dissolveBatch items error:', itemsErr); return false }
+
+  // Delete the batch
+  const { error: batchErr } = await supabase.from('batches').delete().eq('id', batchId)
+  if (batchErr) { console.error('dissolveBatch batch error:', batchErr); return false }
+
+  // Reset job statuses back to 'submitted' so items return to unbatched queue
+  if (batchItems) {
+    const jobIds = new Set<string>()
+    for (const bi of batchItems) {
+      const jobItem = bi.job_items as unknown as { job_id: string }
+      if (jobItem?.job_id) jobIds.add(jobItem.job_id)
+    }
+    await Promise.all(
+      Array.from(jobIds).map(jid =>
+        supabase.from('jobs').update({ status: 'submitted', updated_at: new Date().toISOString() }).eq('id', jid)
+      )
+    )
+  }
+
+  return true
+}
+
 // ---- File Storage ----
 
 export async function uploadFile(file: File, path: string): Promise<string | null> {

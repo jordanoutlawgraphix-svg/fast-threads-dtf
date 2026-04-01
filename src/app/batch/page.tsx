@@ -217,18 +217,25 @@ function GangSheetPreview({ layout }: { layout: ReturnType<typeof layoutGangShee
       </div>
       <div className="overflow-auto border border-gray-700 rounded" style={{ maxHeight: '500px' }}>
         <svg width={svgWidth} height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="bg-white">
-          <rect x={0} y={0} width={svgWidth} height={10 * scale / 20} fill="#f97316" />
+          <rect x={0} y={0} width={svgWidth} height={10} fill="#f97316" />
           <text x={svgWidth / 2} y={8} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">START BATCH #{layout.batch_number}</text>
-          {layout.placed_items.map((item, i) => (
-            <g key={i}>
-              <rect x={item.x * scale} y={item.y * scale} width={item.width * scale} height={item.height * scale}
-                fill="#e5e7eb" stroke="#9ca3af" strokeWidth={0.5} rx={2} />
-              <text x={item.x * scale + (item.width * scale) / 2} y={item.y * scale + (item.height * scale) / 2}
-                textAnchor="middle" dominantBaseline="middle" fill="#374151" fontSize={Math.min(6, item.width * scale / 10)}>
-                {item.invoice_number}
-              </text>
-            </g>
-          ))}
+          {layout.placed_items.map((item, i) => {
+            const x = item.x * scale
+            const y = item.y * scale
+            const w = item.width * scale
+            const h = item.height * scale
+            return (
+              <g key={i}>
+                <rect x={x} y={y} width={w} height={h} fill="#f9fafb" stroke="#d1d5db" strokeWidth={0.5} rx={1} />
+                {item.thumbnail_url ? (
+                  <image href={item.thumbnail_url} x={x + 1} y={y + 1} width={w - 2} height={h - 2} preserveAspectRatio="xMidYMid meet" />
+                ) : (
+                  <text x={x + w / 2} y={y + h / 2} textAnchor="middle" dominantBaseline="middle" fill="#6b7280"
+                    fontSize={Math.min(6, w / 10)}>{item.invoice_number}</text>
+                )}
+              </g>
+            )
+          })}
           <rect x={0} y={svgHeight - 10} width={svgWidth} height={10} fill="#f97316" />
           <text x={svgWidth / 2} y={svgHeight - 3} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">END BATCH #{layout.batch_number}</text>
         </svg>

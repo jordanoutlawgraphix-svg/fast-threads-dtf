@@ -26,6 +26,7 @@ export interface PlacedItem {
   label: string
   invoice_number: string
   copy_index: number // which copy this is (0-based)
+  thumbnail_url?: string
 }
 
 export interface GangSheetLayout {
@@ -91,6 +92,7 @@ export function layoutGangSheet(
       label: item.label,
       invoice_number: item.invoice_number,
       copy_index: copyIndex,
+      thumbnail_url: item.thumbnail_url,
     })
 
     currentX += itemWidth + spacing_inches

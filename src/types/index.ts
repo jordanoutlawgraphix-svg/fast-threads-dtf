@@ -112,6 +112,9 @@ export interface SubmissionFormData {
 
 export interface SubmissionItemData {
   file: File | null
+  // If the source was a PDF, keep the original for vector re-rendering
+  // at any target size without quality loss
+  originalPdfFile: File | null
   placement: PlacementType
   garment_age: GarmentAge
   quantity: number

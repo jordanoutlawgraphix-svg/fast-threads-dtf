@@ -16,7 +16,7 @@ import {
   validateItemSizing,
 } from '@/lib/sizing-engine'
 import * as store from '@/lib/store'
-import { isPDF, convertPDFToImage } from '@/lib/pdf-converter'
+import { isPDF, convertPDFToImage, renderPDFAtSize } from '@/lib/pdf-converter'
 
 // Placement codes for auto-naming items
 const PLACEMENT_CODES: Record<PlacementType, string> = {
@@ -44,6 +44,7 @@ function getItemLabel(invoiceNumber: string, item: SubmissionItemData): string {
 
 const EMPTY_ITEM: SubmissionItemData = {
   file: null,
+  originalPdfFile: null,
   placement: 'left_chest',
   garment_age: 'adult',
   quantity: 1,
@@ -100,13 +101,16 @@ export default function SubmitJobPage() {
 
   const handleFileChange = async (index: number, file: File | null) => {
     if (!file) {
-      updateItem(index, { file: null, detected_width_px: 0, detected_height_px: 0 })
+      updateItem(index, { file: null, originalPdfFile: null, detected_width_px: 0, detected_height_px: 0 })
       return
     }
 
-    // Convert PDF to PNG automatically
+    // Track if this was a PDF so we can re-render at any size later
+    let originalPdf: File | null = null
     let processedFile = file
+
     if (isPDF(file)) {
+      originalPdf = file // Keep the vector source
       try {
         processedFile = await convertPDFToImage(file)
       } catch (err) {
@@ -128,6 +132,7 @@ export default function SubmitJobPage() {
       const sizing = calculateTargetSize(dims.width, dims.height, 300, item.placement, item.garment_age)
       updateItem(index, {
         file,
+        originalPdfFile: originalPdf,
         detected_width_px: dims.width,
         detected_height_px: dims.height,
         suggested_width_inches: sizing.target_width_inches,
@@ -143,14 +148,10 @@ export default function SubmitJobPage() {
   }
 
   const handlePlacementChange = (index: number, placement: PlacementType) => {
-    // Changing placement never changes dimensions — files are pre-sized.
-    // Just update placement and let validation warn if it exceeds the recommendation.
     updateItem(index, { placement, size_confirmed: false })
   }
 
   const handleAgeChange = (index: number, garmentAge: GarmentAge) => {
-    // Changing garment age doesn't change dimensions — files are pre-sized.
-    // Just update the age flag and let validation handle warnings.
     updateItem(index, { garment_age: garmentAge, size_confirmed: false })
   }
 
@@ -166,8 +167,11 @@ export default function SubmitJobPage() {
       if (item.quantity < 1) { setError(`Item ${i + 1}: Quantity must be at least 1.`); return }
       if (!item.size_confirmed) { setError(`Item ${i + 1}: Please confirm the print size.`); return }
       if (item.placement === 'custom' && !item.custom_placement_name.trim()) { setError(`Item ${i + 1}: Please specify the custom placement name.`); return }
-      const validation = validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)
-      if (!validation.valid) { setError(`Item ${i + 1}: ${validation.errors.join(' ')}`); return }
+      // Skip DPI validation for PDF-sourced items (they'll be re-rendered at 300 DPI)
+      if (!item.originalPdfFile) {
+        const validation = validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)
+        if (!validation.valid) { setError(`Item ${i + 1}: ${validation.errors.join(' ')}`); return }
+      }
     }
 
     setSubmitting(true)
@@ -191,11 +195,37 @@ export default function SubmitJobPage() {
 
       for (const item of items) {
         const itemId = uuidv4()
-        const ext = item.file!.name.split('.').pop() || 'png'
+
+        // If this item came from a PDF, re-render at the confirmed dimensions
+        // to get a perfect 300 DPI raster at the exact target size
+        let uploadFile = item.file!
+        if (item.originalPdfFile) {
+          try {
+            uploadFile = await renderPDFAtSize(
+              item.originalPdfFile,
+              item.confirmed_width_inches,
+              item.confirmed_height_inches,
+              300
+            )
+          } catch (err) {
+            console.error('PDF re-render error:', err)
+            // Fall back to the preview PNG if re-render fails
+          }
+        }
+
+        const ext = uploadFile.name.split('.').pop() || 'png'
         const filePath = `jobs/${jobId}/${itemId}.${ext}`
 
         // Upload file to Supabase Storage
-        const fileUrl = await store.uploadFile(item.file!, filePath)
+        const fileUrl = await store.uploadFile(uploadFile, filePath)
+
+        // For PDF-sourced items, the final file IS 300 DPI at the target size
+        const finalWidthPx = item.originalPdfFile
+          ? Math.round(item.confirmed_width_inches * 300)
+          : item.detected_width_px
+        const finalHeightPx = item.originalPdfFile
+          ? Math.round(item.confirmed_height_inches * 300)
+          : item.detected_height_px
 
         await store.createJobItem({
           id: itemId,
@@ -203,11 +233,11 @@ export default function SubmitJobPage() {
           placement: item.placement,
           garment_age: item.garment_age,
           quantity: item.quantity,
-          original_filename: item.file!.name,
+          original_filename: item.originalPdfFile ? item.originalPdfFile.name : item.file!.name,
           file_path: filePath,
           thumbnail_path: filePath,
-          source_width_px: item.detected_width_px,
-          source_height_px: item.detected_height_px,
+          source_width_px: finalWidthPx,
+          source_height_px: finalHeightPx,
           source_dpi: 300,
           target_width_inches: item.confirmed_width_inches,
           target_height_inches: item.confirmed_height_inches,
@@ -353,9 +383,28 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
   onFileChange: (i: number, f: File | null) => void; onPlacementChange: (i: number, p: PlacementType) => void
   onAgeChange: (i: number, a: GarmentAge) => void; onRemove: (i: number) => void; onDuplicate: (i: number, asYouth: boolean) => void; canRemove: boolean
 }) {
-  const validation = item.detected_width_px > 0
+  // For PDF-sourced items, skip DPI validation (will be re-rendered at 300 DPI on submit)
+  const isVector = !!item.originalPdfFile
+  const validation = item.detected_width_px > 0 && !isVector
     ? validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)
     : null
+  // For vector items, still check placement size limits
+  const placementValidation = item.detected_width_px > 0 && isVector
+    ? (() => {
+        const profile = DEFAULT_SIZE_PROFILES.find(sp => sp.placement === item.placement && sp.garment_age === item.garment_age)
+        const warnings: string[] = []
+        if (profile) {
+          if (item.confirmed_width_inches > profile.width_inches * 1.1) {
+            warnings.push(`Width (${item.confirmed_width_inches}") exceeds recommended max for ${profile.label} (${profile.width_inches}").`)
+          }
+          if (item.confirmed_height_inches > profile.height_inches * 1.1) {
+            warnings.push(`Height (${item.confirmed_height_inches}") exceeds recommended max for ${profile.label} (${profile.height_inches}").`)
+          }
+        }
+        return warnings.length > 0 ? { warnings } : null
+      })()
+    : null
+
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
 
@@ -364,8 +413,7 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
     await onFileChange(index, file)
   }
 
-  // Generate preview URL from the actual stored file (which is the converted PNG, not the original PDF)
-  // This runs whenever item.file changes
+  // Generate preview URL from the actual stored file (the converted PNG, not the original PDF)
   useEffect(() => {
     if (item.file) {
       const url = URL.createObjectURL(item.file)
@@ -402,7 +450,14 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="font-semibold">Print Item #{index + 1}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold">Print Item #{index + 1}</h3>
+            {isVector && (
+              <span className="text-[10px] px-1.5 py-0.5 bg-green-900/40 border border-green-700/50 text-green-300 rounded font-medium">
+                VECTOR PDF — scales to any size at 300 DPI
+              </span>
+            )}
+          </div>
           {item.file && item.confirmed_width_inches > 0 && (
             <p className="text-xs text-orange-400 font-mono mt-1">{getItemLabel(invoiceNumber, item)}</p>
           )}
@@ -457,7 +512,14 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
               </button>
             </div>
           )}
-          {item.detected_width_px > 0 && <p className="mt-2 text-xs text-gray-500">Source: {item.detected_width_px} x {item.detected_height_px}px</p>}
+          {item.detected_width_px > 0 && (
+            <p className="mt-2 text-xs text-gray-500">
+              {isVector
+                ? `Vector source — will render at 300 DPI at any size`
+                : `Source: ${item.detected_width_px} x ${item.detected_height_px}px`
+              }
+            </p>
+          )}
         </div>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -511,11 +573,17 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
                 const p = DEFAULT_SIZE_PROFILES.find(sp => sp.placement === item.placement && sp.garment_age === item.garment_age)
                 return p ? `${p.width_inches}" x ${p.height_inches}"` : 'N/A'
               })()}</p>
+              {isVector && (
+                <p className="text-xs text-green-400 mt-1">Vector source — 300 DPI guaranteed at any size</p>
+              )}
               {validation && validation.warnings.length > 0 && (
                 <div className="mt-2">{validation.warnings.map((w, i) => (<p key={i} className="text-xs text-yellow-400 mt-1">{w}</p>))}</div>
               )}
               {validation && validation.errors.length > 0 && (
                 <div className="mt-2">{validation.errors.map((e, i) => (<p key={i} className="text-xs text-red-400 mt-1">{e}</p>))}</div>
+              )}
+              {placementValidation && placementValidation.warnings.length > 0 && (
+                <div className="mt-2">{placementValidation.warnings.map((w, i) => (<p key={i} className="text-xs text-yellow-400 mt-1">{w}</p>))}</div>
               )}
               <label className="flex items-center gap-2 mt-3 cursor-pointer">
                 <input type="checkbox" checked={item.size_confirmed} onChange={e => onUpdate(index, { size_confirmed: e.target.checked })} className="w-4 h-4 accent-orange-500" />

@@ -1,8 +1,0 @@
-[main 77c8e21] Clean up temp files
- 4 files changed, 21 insertions(+)
- create mode 100644 push_err.txt
- create mode 100644 push_out.txt
-To https://github.com/jordanoutlawgraphix-svg/fast-threads-dtf.git
- * [new branch]      main -> main
-branch 'main' set up to track 'origin/main'.
-DONE

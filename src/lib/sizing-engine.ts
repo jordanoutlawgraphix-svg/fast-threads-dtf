@@ -112,6 +112,10 @@ export function detectImageDimensions(file: File): Promise<{ width: number; heig
 
 /**
  * Validate a submission item's sizing
+ *
+ * DPI warnings: Only warn if effective DPI drops below 150 (actually pixelated).
+ * The RIP software (CADlink) handles upscaling, so mild DPI reduction from manual
+ * size adjustments is normal and expected — no need to nag operators about it.
  */
 export interface SizeValidation {
   valid: boolean
@@ -130,15 +134,14 @@ export function validateItemSizing(
   const warnings: string[] = []
   const errors: string[] = []
 
-  // Check minimum source resolution
+  // Check minimum source resolution — only flag truly problematic DPI
   const effectiveDpi = sourceWidthPx / targetWidthInches
   if (effectiveDpi < 100) {
-    errors.push(`Image is too low resolution for this print size (${Math.round(effectiveDpi)} DPI). Minimum 150 DPI required.`)
+    errors.push(`Very low resolution (${Math.round(effectiveDpi)} DPI) — print will look pixelated. Consider using a higher resolution file.`)
   } else if (effectiveDpi < 150) {
-    warnings.push(`Low resolution (${Math.round(effectiveDpi)} DPI). May look pixelated. 300 DPI recommended.`)
-  } else if (effectiveDpi < 300) {
-    warnings.push(`Acceptable resolution (${Math.round(effectiveDpi)} DPI) but 300 DPI recommended for best quality.`)
+    warnings.push(`Low resolution (${Math.round(effectiveDpi)} DPI). May look pixelated at this size.`)
   }
+  // 150+ DPI: no warning. RIP software handles upscaling fine.
 
   // Check if dimensions seem reasonable for placement
   const profile = getSizeProfile(placement, garmentAge)

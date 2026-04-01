@@ -1,8 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import Image from 'next/image'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import * as store from '@/lib/store'
 
@@ -25,7 +24,8 @@ export function Navigation() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-14">
             <Link href="/" className="flex items-center gap-3">
-              <Image src="/logo.png" alt="Fast Threads" width={140} height={32} className="h-8 w-auto" priority />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/logo.png" alt="Fast Threads" className="h-8 w-auto" />
               <span className="text-gray-500 text-sm font-light">|</span>
               <span className="font-medium text-sm text-gray-300">DTF Manager</span>
             </Link>
@@ -98,7 +98,7 @@ function FeedbackModal({ onClose, currentPage }: { onClose: () => void; currentP
             </svg>
           </div>
           <p className="font-medium mb-1">Thanks for the feedback!</p>
-          <p className="text-sm text-gray-400">We'll review it and work on it.</p>
+          <p className="text-sm text-gray-400">We&apos;ll review it and work on it.</p>
           <button onClick={onClose} className="mt-4 px-4 py-2 bg-gray-800 text-gray-300 rounded-lg text-sm hover:bg-gray-700">Close</button>
         </div>
       </div>

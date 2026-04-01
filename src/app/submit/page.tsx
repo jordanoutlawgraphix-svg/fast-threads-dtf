@@ -23,10 +23,10 @@ const EMPTY_ITEM: SubmissionItemData = {
   placement: 'left_chest',
   garment_age: 'adult',
   quantity: 1,
-  custom_placement_name: '',  detected_width_px: 0,
+  custom_placement_name: '',
+  detected_width_px: 0,
   detected_height_px: 0,
-  suggested_width_inches: 0,
-  suggested_height_inches: 0,
+  suggested_width_inches: 0,  suggested_height_inches: 0,
   confirmed_width_inches: 0,
   confirmed_height_inches: 0,
   size_confirmed: false,
@@ -44,18 +44,18 @@ export default function SubmitJobPage() {
   const [hasYouthGarments, setHasYouthGarments] = useState<boolean | null>(null)
   const [youthConfirmed, setYouthConfirmed] = useState(false)
   const [validationToast, setValidationToast] = useState<string | null>(null)
+  const [isRush, setIsRush] = useState(false)
+  const [dueDate, setDueDate] = useState('')
   const errorRef = useRef<HTMLDivElement>(null)
 
-  // Auto-scroll to error banner when a validation error is set
   useEffect(() => {
-    if (error && errorRef.current) {      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    if (error && errorRef.current) {
+      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
   }, [error])
 
-  // Auto-dismiss toast after 4 seconds
   useEffect(() => {
-    if (validationToast) {
-      const timer = setTimeout(() => setValidationToast(null), 4000)
+    if (validationToast) {      const timer = setTimeout(() => setValidationToast(null), 4000)
       return () => clearTimeout(timer)
     }
   }, [validationToast])
@@ -74,23 +74,20 @@ export default function SubmitJobPage() {
     if (items.length <= 1) return
     setItems(prev => prev.filter((_, i) => i !== index))
   }
+
   const handleFileChange = async (index: number, file: File | null) => {
     if (!file) {
       updateItem(index, { file: null, detected_width_px: 0, detected_height_px: 0 })
       return
     }
-
-    // Convert PDF to PNG automatically
     let processedFile = file
     if (isPDF(file)) {
       try {
         processedFile = await convertPDFToImage(file)
-      } catch {
-        setError('Failed to convert PDF. Make sure it contains at least one page.')
+      } catch {        setError('Failed to convert PDF. Make sure it contains at least one page.')
         return
       }
     }
-
     const validTypes = ['image/png', 'image/jpeg', 'image/tiff', 'image/webp']
     if (!validTypes.includes(processedFile.type)) {
       setError(`Invalid file type: ${file.type}. Please use PNG, JPG, TIFF, WebP, or PDF.`)
@@ -98,16 +95,13 @@ export default function SubmitJobPage() {
     }
     try {
       file = processedFile
-      const dims = await detectImageDimensions(file)      const item = items[index]
+      const dims = await detectImageDimensions(file)
+      const item = items[index]
       const sizing = calculateTargetSize(dims.width, dims.height, 300, item.placement, item.garment_age)
       updateItem(index, {
-        file,
-        detected_width_px: dims.width,
-        detected_height_px: dims.height,
-        suggested_width_inches: sizing.target_width_inches,
-        suggested_height_inches: sizing.target_height_inches,
-        confirmed_width_inches: sizing.target_width_inches,
-        confirmed_height_inches: sizing.target_height_inches,
+        file, detected_width_px: dims.width, detected_height_px: dims.height,
+        suggested_width_inches: sizing.target_width_inches, suggested_height_inches: sizing.target_height_inches,
+        confirmed_width_inches: sizing.target_width_inches, confirmed_height_inches: sizing.target_height_inches,
         size_confirmed: false,
       })
       setError(null)
@@ -119,17 +113,11 @@ export default function SubmitJobPage() {
   const handlePlacementChange = (index: number, placement: PlacementType) => {
     const item = items[index]
     if (item.detected_width_px > 0) {
-      const sizing = calculateTargetSize(item.detected_width_px, item.detected_height_px, 300, placement, item.garment_age)
-      updateItem(index, {
-        placement,
-        suggested_width_inches: sizing.target_width_inches,
-        suggested_height_inches: sizing.target_height_inches,        confirmed_width_inches: sizing.target_width_inches,
-        confirmed_height_inches: sizing.target_height_inches,
-        size_confirmed: false,
+      const sizing = calculateTargetSize(item.detected_width_px, item.detected_height_px, 300, placement, item.garment_age)      updateItem(index, {
+        placement, suggested_width_inches: sizing.target_width_inches, suggested_height_inches: sizing.target_height_inches,
+        confirmed_width_inches: sizing.target_width_inches, confirmed_height_inches: sizing.target_height_inches, size_confirmed: false,
       })
-    } else {
-      updateItem(index, { placement })
-    }
+    } else { updateItem(index, { placement }) }
   }
 
   const handleAgeChange = (index: number, garmentAge: GarmentAge) => {
@@ -143,15 +131,10 @@ export default function SubmitJobPage() {
         sizing = calculateTargetSize(item.detected_width_px, item.detected_height_px, 300, item.placement, garmentAge)
       }
       updateItem(index, {
-        garment_age: garmentAge,
-        suggested_width_inches: sizing.target_width_inches,
-        suggested_height_inches: sizing.target_height_inches,
-        confirmed_width_inches: sizing.target_width_inches,
-        confirmed_height_inches: sizing.target_height_inches,        size_confirmed: false,
+        garment_age: garmentAge, suggested_width_inches: sizing.target_width_inches, suggested_height_inches: sizing.target_height_inches,
+        confirmed_width_inches: sizing.target_width_inches, confirmed_height_inches: sizing.target_height_inches, size_confirmed: false,
       })
-    } else {
-      updateItem(index, { garment_age: garmentAge })
-    }
+    } else { updateItem(index, { garment_age: garmentAge }) }
   }
 
   const handleSubmit = async () => {
@@ -160,8 +143,8 @@ export default function SubmitJobPage() {
       setValidationToast(msg)
     }
 
-    if (!invoiceNumber.trim()) { showValidationError('Invoice number is required.'); return }
-    if (!submitterName.trim()) { showValidationError('Your name is required.'); return }
+    if (!invoiceNumber.trim()) { showValidationError('Invoice number is required.'); return }    if (!submitterName.trim()) { showValidationError('Your name is required.'); return }
+    if (isRush && !dueDate) { showValidationError('Please select a due date for this rush job.'); return }
     if (hasYouthGarments === null) { showValidationError('Please answer: Are there youth garments in this order?'); return }
     if (hasYouthGarments && !youthConfirmed) { showValidationError('Please confirm that you have added separate items for youth sizes.'); return }
 
@@ -171,7 +154,8 @@ export default function SubmitJobPage() {
       if (item.quantity < 1) { showValidationError(`Item ${i + 1}: Quantity must be at least 1.`); return }
       if (!item.size_confirmed) { showValidationError(`Item ${i + 1}: Please confirm the print size.`); return }
       if (item.placement === 'custom' && !item.custom_placement_name.trim()) { showValidationError(`Item ${i + 1}: Please specify the custom placement name.`); return }
-      const validation = validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)      if (!validation.valid) { showValidationError(`Item ${i + 1}: ${validation.errors.join(' ')}`); return }
+      const validation = validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)
+      if (!validation.valid) { showValidationError(`Item ${i + 1}: ${validation.errors.join(' ')}`); return }
     }
 
     setSubmitting(true)
@@ -188,38 +172,47 @@ export default function SubmitJobPage() {
         location_code: location.code,
         submitter_name: submitterName.trim(),
         status: 'submitted',
-        notes: notes.trim() || null,
+        notes: notes.trim() || null,        is_rush: isRush,
+        due_date: isRush ? dueDate : null,
       })
 
       if (!job) throw new Error('Failed to create job')
 
       for (const item of items) {
         const itemId = uuidv4()
-        const ext = item.file!.name.split('.').pop() || 'png'        const filePath = `jobs/${jobId}/${itemId}.${ext}`
-
-        // Upload file to Supabase Storage
+        const ext = item.file!.name.split('.').pop() || 'png'
+        const filePath = `jobs/${jobId}/${itemId}.${ext}`
         const fileUrl = await store.uploadFile(item.file!, filePath)
-
         await store.createJobItem({
-          id: itemId,
-          job_id: jobId,
-          placement: item.placement,
-          garment_age: item.garment_age,
-          quantity: item.quantity,
-          original_filename: item.file!.name,
-          file_path: filePath,
-          thumbnail_path: filePath,
-          source_width_px: item.detected_width_px,
-          source_height_px: item.detected_height_px,
-          source_dpi: 300,
-          target_width_inches: item.confirmed_width_inches,
-          target_height_inches: item.confirmed_height_inches,
-          size_auto: true,
-          size_confirmed: item.size_confirmed,
-          custom_placement_name: item.placement === 'custom' ? item.custom_placement_name : null,
-          notes: null,
+          id: itemId, job_id: jobId, placement: item.placement, garment_age: item.garment_age,
+          quantity: item.quantity, original_filename: item.file!.name, file_path: filePath, thumbnail_path: filePath,
+          source_width_px: item.detected_width_px, source_height_px: item.detected_height_px, source_dpi: 300,
+          target_width_inches: item.confirmed_width_inches, target_height_inches: item.confirmed_height_inches,
+          size_auto: true, size_confirmed: item.size_confirmed,
+          custom_placement_name: item.placement === 'custom' ? item.custom_placement_name : null, notes: null,
         })
       }
+
+      // Send rush notification email if this is a rush job
+      if (isRush) {
+        try {
+          await fetch('/api/rush-notification', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              invoice_number: invoiceNumber.trim(),
+              submitter_name: submitterName.trim(),              location_name: location.name,
+              due_date: dueDate,
+              item_count: items.length,
+              total_prints: items.reduce((sum, i) => sum + i.quantity, 0),
+              notes: notes.trim() || null,
+            }),
+          })
+        } catch {
+          console.error('Rush notification email failed')
+        }
+      }
+
       setSubmitted(true)
     } catch (err) {
       console.error(err)
@@ -238,13 +231,13 @@ export default function SubmitJobPage() {
           </svg>
         </div>
         <h2 className="text-xl font-bold mb-2">Job Submitted Successfully!</h2>
-        <p className="text-gray-400 mb-6">Invoice #{invoiceNumber} has been added to the print queue.</p>
-        <div className="flex gap-4 justify-center">
+        <p className="text-gray-400 mb-6">Invoice #{invoiceNumber} has been added to the print queue.</p>        <div className="flex gap-4 justify-center">
           <button
-            onClick={() => { setSubmitted(false); setInvoiceNumber(''); setNotes(''); setItems([{ ...EMPTY_ITEM }]); setHasYouthGarments(null); setYouthConfirmed(false) }}
+            onClick={() => { setSubmitted(false); setInvoiceNumber(''); setNotes(''); setItems([{ ...EMPTY_ITEM }]); setHasYouthGarments(null); setYouthConfirmed(false); setIsRush(false); setDueDate('') }}
             className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
           >
-            Submit Another Job          </button>
+            Submit Another Job
+          </button>
           <a href="/queue" className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors">View Queue</a>
         </div>
       </div>
@@ -259,6 +252,35 @@ export default function SubmitJobPage() {
         <div ref={errorRef} className="mb-6 p-4 bg-red-900/30 border border-red-800/50 rounded-lg text-red-300 text-sm">{error}</div>
       )}
 
+      {/* Rush Job Toggle */}
+      <div className={`border rounded-lg p-6 mb-6 transition-colors ${isRush ? 'bg-red-900/20 border-red-800/50' : 'bg-gray-900 border-gray-800'}`}>
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={isRush}
+            onChange={e => { setIsRush(e.target.checked); if (!e.target.checked) setDueDate('') }}
+            className="w-5 h-5 accent-red-500"
+          />          <div>
+            <span className={`font-semibold ${isRush ? 'text-red-300' : 'text-gray-200'}`}>
+              RUSH JOB
+            </span>
+            <p className="text-xs text-gray-400 mt-0.5">Check this for priority orders. Savannah will be notified immediately.</p>
+          </div>
+        </label>
+        {isRush && (
+          <div className="mt-4 ml-8">
+            <label className="block text-sm text-red-300 mb-1">Due Date *</label>
+            <input
+              type="date"
+              value={dueDate}
+              onChange={e => setDueDate(e.target.value)}
+              min={new Date().toISOString().split('T')[0]}
+              className="px-3 py-2 bg-gray-800 border border-red-700/50 rounded-lg text-white focus:outline-none focus:border-red-500 text-sm"
+            />
+          </div>
+        )}
+      </div>
+
       {/* Job Info */}
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
         <h2 className="font-semibold mb-4">Job Information</h2>
@@ -266,9 +288,9 @@ export default function SubmitJobPage() {
           <div>
             <label className="block text-sm text-gray-400 mb-1">Invoice Number *</label>
             <input type="text" value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} placeholder="e.g., INV-2024-001"
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-orange-500" />
-          </div>
-          <div>            <label className="block text-sm text-gray-400 mb-1">Location *</label>
+              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-orange-500" />          </div>
+          <div>
+            <label className="block text-sm text-gray-400 mb-1">Location *</label>
             <select value={locationId} onChange={e => setLocationId(e.target.value)}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-orange-500">
               {LOCATIONS.map(loc => (<option key={loc.id} value={loc.id}>{loc.name}</option>))}
@@ -292,10 +314,10 @@ export default function SubmitJobPage() {
         <h2 className="font-semibold mb-3 text-yellow-300">Youth Garment Check</h2>
         <p className="text-sm text-gray-300 mb-4">
           Does this order include any youth/kids garments? If yes, you MUST submit separate items with
-          youth sizing — adult prints do not automatically fit youth garments correctly.        </p>
+          youth sizing — adult prints do not automatically fit youth garments correctly.
+        </p>
         <div className="flex gap-4">
-          <button onClick={() => { setHasYouthGarments(true); setYouthConfirmed(false) }}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${hasYouthGarments === true ? 'bg-yellow-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
+          <button onClick={() => { setHasYouthGarments(true); setYouthConfirmed(false) }}            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${hasYouthGarments === true ? 'bg-yellow-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
             Yes, there are youth garments
           </button>
           <button onClick={() => { setHasYouthGarments(false); setYouthConfirmed(false) }}
@@ -317,15 +339,15 @@ export default function SubmitJobPage() {
         )}
       </div>
 
-      {/* Print Items */}      <div className="space-y-6 mb-6">
+      {/* Print Items */}
+      <div className="space-y-6 mb-6">
         {items.map((item, index) => (
           <ItemForm key={index} index={index} item={item} onUpdate={updateItem} onFileChange={handleFileChange}
             onPlacementChange={handlePlacementChange} onAgeChange={handleAgeChange} onRemove={removeItem} canRemove={items.length > 1} />
         ))}
       </div>
 
-      <div className="flex gap-4 mb-8">
-        <button onClick={addItem} className="px-4 py-2 bg-gray-800 border border-gray-700 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors text-sm">
+      <div className="flex gap-4 mb-8">        <button onClick={addItem} className="px-4 py-2 bg-gray-800 border border-gray-700 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors text-sm">
           + Add Another Print
         </button>
       </div>
@@ -333,7 +355,7 @@ export default function SubmitJobPage() {
       <div className="relative">
         <div className="flex justify-between">
           <button
-            onClick={() => { setInvoiceNumber(''); setSubmitterName(''); setNotes(''); setItems([{ ...EMPTY_ITEM }]); setHasYouthGarments(null); setYouthConfirmed(false); setError(null); setValidationToast(null) }}
+            onClick={() => { setInvoiceNumber(''); setSubmitterName(''); setNotes(''); setItems([{ ...EMPTY_ITEM }]); setHasYouthGarments(null); setYouthConfirmed(false); setError(null); setValidationToast(null); setIsRush(false); setDueDate('') }}
             className="px-6 py-3 bg-gray-800 border border-gray-700 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors font-medium"
           >
             Clear / Start Over
@@ -342,7 +364,7 @@ export default function SubmitJobPage() {
             className="px-8 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
             {submitting ? 'Submitting...' : 'Submit Job'}
           </button>
-        </div>        {/* Validation toast near submit button */}
+        </div>
         {validationToast && (
           <div className="absolute bottom-full right-0 mb-3 max-w-md animate-bounce-once">
             <div className="bg-red-600 text-white text-sm font-medium px-4 py-3 rounded-lg shadow-lg flex items-center gap-2">
@@ -354,8 +376,7 @@ export default function SubmitJobPage() {
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
-              </button>
-            </div>
+              </button>            </div>
             <div className="absolute bottom-0 right-8 translate-y-1/2 w-3 h-3 bg-red-600 rotate-45"></div>
           </div>
         )}
@@ -367,7 +388,8 @@ export default function SubmitJobPage() {
 function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAgeChange, onRemove, canRemove }: {
   index: number; item: SubmissionItemData; onUpdate: (i: number, u: Partial<SubmissionItemData>) => void
   onFileChange: (i: number, f: File | null) => void; onPlacementChange: (i: number, p: PlacementType) => void
-  onAgeChange: (i: number, a: GarmentAge) => void; onRemove: (i: number) => void; canRemove: boolean}) {
+  onAgeChange: (i: number, a: GarmentAge) => void; onRemove: (i: number) => void; canRemove: boolean
+}) {
   const validation = item.detected_width_px > 0
     ? validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)
     : null
@@ -385,8 +407,7 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
-    setDragging(false)
-    const file = e.dataTransfer.files?.[0] || null
+    setDragging(false)    const file = e.dataTransfer.files?.[0] || null
     if (file) {
       const validTypes = ['image/png', 'image/jpeg', 'image/tiff', 'image/webp', 'application/pdf']
       if (validTypes.includes(file.type) || file.name.toLowerCase().endsWith('.pdf')) {
@@ -394,6 +415,7 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
       }
     }
   }
+
   const clearFile = () => {
     setPreviewUrl(null)
     onFileChange(index, null)
@@ -414,10 +436,10 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
               onDragOver={e => { e.preventDefault(); setDragging(true) }}
               onDragLeave={() => setDragging(false)}
               onDrop={handleDrop}
-              className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${
-                dragging
+              className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${                dragging
                   ? 'border-orange-500 bg-orange-900/20'
-                  : 'border-gray-700 bg-gray-800/50 hover:border-gray-600'              }`}
+                  : 'border-gray-700 bg-gray-800/50 hover:border-gray-600'
+              }`}
             >
               <input
                 type="file"
@@ -441,9 +463,9 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
                 className="absolute top-1 right-1 w-6 h-6 bg-red-600 text-white rounded-full text-xs font-bold hover:bg-red-500 flex items-center justify-center"
                 title="Remove file"
               >
-                X              </button>
-            </div>
-          )}
+                X
+              </button>
+            </div>          )}
           {item.detected_width_px > 0 && <p className="mt-2 text-xs text-gray-500">Source: {item.detected_width_px} x {item.detected_height_px}px</p>}
         </div>
         <div className="space-y-4">
@@ -466,14 +488,14 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
           </div>
           {item.placement === 'custom' && (
             <div>
-              <label className="block text-sm text-gray-400 mb-1">Custom Placement Name *</label>              <input type="text" value={item.custom_placement_name} onChange={e => onUpdate(index, { custom_placement_name: e.target.value })}
+              <label className="block text-sm text-gray-400 mb-1">Custom Placement Name *</label>
+              <input type="text" value={item.custom_placement_name} onChange={e => onUpdate(index, { custom_placement_name: e.target.value })}
                 placeholder="e.g., Right hip, Hat front..."
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500" />
             </div>
           )}
           <div>
-            <label className="block text-sm text-gray-400 mb-1">Quantity *</label>
-            <input type="number" min={1} value={item.quantity} onChange={e => onUpdate(index, { quantity: parseInt(e.target.value) || 1 })}
+            <label className="block text-sm text-gray-400 mb-1">Quantity *</label>            <input type="number" min={1} value={item.quantity} onChange={e => onUpdate(index, { quantity: parseInt(e.target.value) || 1 })}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-orange-500" />
           </div>
           {item.detected_width_px > 0 && (
@@ -490,7 +512,8 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
                   <label className="block text-xs text-gray-500 mb-1">Height (inches)</label>
                   <input type="number" step="0.25" min="0.5" value={item.confirmed_height_inches}
                     onChange={e => onUpdate(index, { confirmed_height_inches: parseFloat(e.target.value) || 0, size_confirmed: false })}
-                    className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-orange-500" />                </div>
+                    className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-orange-500" />
+                </div>
               </div>
               <p className="text-xs text-gray-500 mt-2">Suggested: {item.suggested_width_inches}&quot; x {item.suggested_height_inches}&quot;</p>
               {validation && validation.warnings.length > 0 && (
@@ -502,8 +525,7 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
               <label className="flex items-center gap-2 mt-3 cursor-pointer">
                 <input type="checkbox" checked={item.size_confirmed} onChange={e => onUpdate(index, { size_confirmed: e.target.checked })} className="w-4 h-4 accent-orange-500" />
                 <span className="text-sm text-gray-300">I confirm this print size is correct</span>
-              </label>
-            </div>
+              </label>            </div>
           )}
         </div>
       </div>

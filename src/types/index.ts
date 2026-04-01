@@ -22,8 +22,7 @@ export interface SizeProfile {
   id: string
   placement: PlacementType
   garment_age: GarmentAge
-  width_inches: number
-  height_inches: number
+  width_inches: number  height_inches: number
   label: string
   description: string
 }
@@ -43,11 +42,12 @@ export interface JobSubmission {
   created_at: string
   status: JobStatus
   notes: string | null
+  is_rush: boolean
+  due_date: string | null
 }
 
 export interface JobItem {
-  id: string
-  job_id: string
+  id: string  job_id: string
   placement: PlacementType
   garment_age: GarmentAge
   quantity: number
@@ -71,12 +71,11 @@ export interface JobItem {
 
 export interface Batch {
   id: string
-  batch_number: number
-  created_at: string
+  batch_number: number  created_at: string
   status: BatchStatus
   total_items: number
-  gang_sheet_path: string | null
-  summary_pdf_path: string | null
+  gang_sheet_url: string | null
+  summary_pdf_url: string | null
   notes: string | null
 }
 
@@ -96,8 +95,7 @@ export interface BatchItem {
 // Gang sheet layout config
 export interface GangSheetConfig {
   printable_width_inches: number // 28" for your setup
-  dpi: number // 300 default
-  spacing_inches: number // gap between prints
+  dpi: number // 300 default  spacing_inches: number // gap between prints
   batch_label_height_inches: number // space for "START BATCH X" header
 }
 
@@ -112,9 +110,6 @@ export interface SubmissionFormData {
 
 export interface SubmissionItemData {
   file: File | null
-  // If the source was a PDF, keep the original for vector re-rendering
-  // at any target size without quality loss
-  originalPdfFile: File | null
   placement: PlacementType
   garment_age: GarmentAge
   quantity: number
@@ -124,8 +119,7 @@ export interface SubmissionItemData {
   detected_height_px: number
   suggested_width_inches: number
   suggested_height_inches: number
-  confirmed_width_inches: number
-  confirmed_height_inches: number
+  confirmed_width_inches: number  confirmed_height_inches: number
   size_confirmed: boolean
 }
 
@@ -148,7 +142,6 @@ export const DEFAULT_SIZE_PROFILES: Omit<SizeProfile, 'id'>[] = [
   { placement: 'custom', garment_age: 'adult', width_inches: 10, height_inches: 10, label: 'Custom (Adult)', description: 'Custom placement - set dimensions manually' },
   { placement: 'custom', garment_age: 'youth', width_inches: 7.5, height_inches: 7.5, label: 'Custom (Youth)', description: 'Custom placement youth - set dimensions manually' },
 ]
-
 export const PLACEMENT_LABELS: Record<PlacementType, string> = {
   left_chest: 'Left Chest',
   full_front: 'Full Front',
@@ -161,9 +154,9 @@ export const PLACEMENT_LABELS: Record<PlacementType, string> = {
 }
 
 export const LOCATIONS: Location[] = [
-  { id: '41bfb0ef-47a3-4dbe-b744-fe50fbc3ed43', name: 'Fast Threads - Montevideo', code: 'MVD' },
-  { id: '9089288c-bf33-4446-8752-b2a49766df79', name: 'Fast Threads - Watertown', code: 'WTN' },
-  { id: '35a7a311-d45d-4868-a2eb-f5b1e1bdaa4f', name: "Jim's Clothing - Dawson", code: 'DWS' },
+  { id: '1', name: 'Fast Threads - Montevideo', code: 'MVD' },
+  { id: '2', name: 'Fast Threads - Watertown', code: 'WTN' },
+  { id: '3', name: "Jim's Clothing - Dawson", code: 'DWS' },
 ]
 
 export const DEFAULT_GANG_SHEET_CONFIG: GangSheetConfig = {

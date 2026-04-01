@@ -2,8 +2,8 @@
 // Gang Sheet PNG Export
 // ============================================
 // Renders gang sheet layout to Canvas and exports as PNG.
-// The exported PNG can be placed in the CADlink hot folder
-// or downloaded manually.
+// The exported PNG is transparent (no background) for DTF printing —
+// the RIP software handles the white ink layer.
 
 import { GangSheetLayout } from './gang-sheet-engine'
 import { GangSheetConfig, DEFAULT_GANG_SHEET_CONFIG } from '@/types'
@@ -19,6 +19,7 @@ interface ExportOptions {
 /**
  * Render a gang sheet layout to a PNG blob.
  * Uses an offscreen canvas at the configured DPI.
+ * Background is TRANSPARENT for DTF — the RIP software adds the white ink layer.
  */
 export async function exportGangSheetPNG(
   layout: GangSheetLayout,
@@ -26,12 +27,15 @@ export async function exportGangSheetPNG(
 ): Promise<Blob> {
   const config = options.config || DEFAULT_GANG_SHEET_CONFIG
   const dpi = config.dpi
-  const renderImages = options.renderImages ?? false
-  const imageUrls = options.imageUrls || {}
+  const renderImages = options.renderImages ?? false  const imageUrls = options.imageUrls || {}
 
-  // Calculate pixel dimensions
+  // Calculate pixel dimensions — trim batch label areas from top and bottom
+  // The layout engine adds label padding, but the exported PNG is just artwork
+  const labelHeight = config.batch_label_height_inches
+  const trimmedHeight = layout.sheet_height - (labelHeight * 2) // remove top + bottom labels
   const widthPx = Math.round(layout.sheet_width * dpi)
-  const heightPx = Math.round(layout.sheet_height * dpi)
+  const heightPx = Math.round(trimmedHeight * dpi)
+  const yOffset = labelHeight // shift items up to remove top label gap
 
   const canvas = document.createElement('canvas')
   canvas.width = widthPx
@@ -40,26 +44,8 @@ export async function exportGangSheetPNG(
   const ctx = canvas.getContext('2d')
   if (!ctx) throw new Error('Failed to get canvas 2d context')
 
-  // White background
-  ctx.fillStyle = '#FFFFFF'
-  ctx.fillRect(0, 0, widthPx, heightPx)
-
-  // Draw START batch label
-  const labelHeightPx = config.batch_label_height_inches * dpi
-  ctx.fillStyle = '#f97316' // orange
-  ctx.fillRect(0, 0, widthPx, labelHeightPx)
-  ctx.fillStyle = '#FFFFFF'
-  ctx.font = `bold ${Math.round(labelHeightPx * 0.6)}px Arial`
-  ctx.textAlign = 'center'
-  ctx.textBaseline = 'middle'
-  ctx.fillText(`START BATCH #${layout.batch_number}`, widthPx / 2, labelHeightPx / 2)
-
-  // Draw END batch label
-  const endLabelY = heightPx - labelHeightPx
-  ctx.fillStyle = '#f97316'
-  ctx.fillRect(0, endLabelY, widthPx, labelHeightPx)
-  ctx.fillStyle = '#FFFFFF'
-  ctx.fillText(`END BATCH #${layout.batch_number}`, widthPx / 2, endLabelY + labelHeightPx / 2)
+  // Canvas starts transparent by default — DO NOT fill with white.
+  // DTF RIP software handles the white ink layer automatically.
 
   // Load images if requested
   const loadedImages: Record<string, HTMLImageElement> = {}
@@ -70,17 +56,16 @@ export async function exportGangSheetPNG(
       try {
         const img = await loadImage(url)
         loadedImages[item.item_id] = img
-      } catch {
-        // Skip failed images, will render placeholder
+      } catch {        // Skip failed images, will render placeholder
       }
     })
     await Promise.all(imagePromises)
   }
 
-  // Draw each placed item
+  // Draw each placed item — artwork only, no borders or labels
   for (const item of layout.placed_items) {
     const x = Math.round(item.x * dpi)
-    const y = Math.round(item.y * dpi)
+    const y = Math.round((item.y - yOffset) * dpi) // shift up past label area
     const w = Math.round(item.width * dpi)
     const h = Math.round(item.height * dpi)
 
@@ -89,14 +74,9 @@ export async function exportGangSheetPNG(
       // Draw actual artwork scaled to fit
       ctx.drawImage(img, x, y, w, h)
     } else {
-      // Placeholder box
+      // Placeholder box (only shown when image fails to load)
       ctx.fillStyle = '#e5e7eb'
       ctx.fillRect(x, y, w, h)
-      ctx.strokeStyle = '#9ca3af'
-      ctx.lineWidth = 1
-      ctx.strokeRect(x, y, w, h)
-
-      // Label
       ctx.fillStyle = '#374151'
       const fontSize = Math.min(Math.round(w / 12), Math.round(h / 4), 24)
       ctx.font = `${fontSize}px Arial`
@@ -105,13 +85,7 @@ export async function exportGangSheetPNG(
       ctx.fillText(item.invoice_number, x + w / 2, y + h / 2 - fontSize * 0.6)
       ctx.font = `${Math.round(fontSize * 0.7)}px Arial`
       ctx.fillText(`${item.width.toFixed(1)}" x ${item.height.toFixed(1)}"`, x + w / 2, y + h / 2 + fontSize * 0.6)
-    }
-
-    // Draw thin border around each item for cutting guides
-    ctx.strokeStyle = '#d1d5db'
-    ctx.lineWidth = 1
-    ctx.strokeRect(x, y, w, h)
-  }
+    }  }
 
   // Convert to blob
   return new Promise((resolve, reject) => {
@@ -140,8 +114,7 @@ export async function downloadGangSheetPNG(
   a.download = `gang-sheet-batch-${layout.batch_number}.png`
   document.body.appendChild(a)
   a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  document.body.removeChild(a)  URL.revokeObjectURL(url)
 }
 
 /**

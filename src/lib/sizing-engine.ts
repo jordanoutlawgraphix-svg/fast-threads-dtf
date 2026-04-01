@@ -30,9 +30,9 @@ export function getSizeProfile(
 /**
  * Calculate the target print size for a file given its dimensions and the desired placement.
  *
- * DTF files are typically pre-sized by the designer, so we use the file's actual
- * dimensions (pixels / DPI) as the default. We only scale DOWN if the file exceeds
- * the placement maximum — we never scale UP to fill the max.
+ * NEVER auto-resizes. DTF files are pre-sized by the designer. This function
+ * always returns the actual file dimensions (pixels / DPI) and lets the
+ * validation layer warn if the size exceeds the placement recommendation.
  */
 export function calculateTargetSize(
   sourceWidthPx: number,
@@ -43,61 +43,17 @@ export function calculateTargetSize(
   customProfiles?: Omit<SizeProfile, 'id'>[]
 ): SizingResult {
   const dpi = sourceDpi || 300
-  const profile = getSizeProfile(placement, garmentAge, customProfiles)
 
-  // Calculate actual size in inches from the source file
+  // Always use actual file dimensions — never override
   const actualWidthInches = sourceWidthPx / dpi
   const actualHeightInches = sourceHeightPx / dpi
 
-  if (!profile) {
-    return {
-      target_width_inches: Math.round(actualWidthInches * 100) / 100,
-      target_height_inches: Math.round(actualHeightInches * 100) / 100,
-      source_dpi_at_target: dpi,
-      quality_warning: 'No size profile found for this placement. Using source dimensions.',
-      auto_resized: false,
-    }
-  }
-
-  const maxWidth = profile.width_inches
-  const maxHeight = profile.height_inches
-
-  let targetWidth = actualWidthInches
-  let targetHeight = actualHeightInches
-  let wasScaled = false
-
-  // Only scale DOWN if the file exceeds the placement max — never scale UP
-  if (actualWidthInches > maxWidth || actualHeightInches > maxHeight) {
-    const sourceAspect = sourceWidthPx / sourceHeightPx
-    const profileAspect = maxWidth / maxHeight
-
-    if (sourceAspect > profileAspect) {
-      targetWidth = maxWidth
-      targetHeight = maxWidth / sourceAspect
-    } else {
-      targetHeight = maxHeight
-      targetWidth = maxHeight * sourceAspect
-    }
-    wasScaled = true
-  }
-
-  // Calculate effective DPI at the target size
-  const effectiveDpi = sourceWidthPx / targetWidth
-
-  // Quality check
-  let qualityWarning: string | null = null
-  if (effectiveDpi < 150) {
-    qualityWarning = `WARNING: Image resolution is very low (${Math.round(effectiveDpi)} DPI at print size). Minimum recommended is 300 DPI. This will look pixelated.`
-  } else if (effectiveDpi < 300) {
-    qualityWarning = `Acceptable resolution (${Math.round(effectiveDpi)} DPI) but 300 DPI recommended for best quality.`
-  }
-
   return {
-    target_width_inches: Math.round(targetWidth * 100) / 100,
-    target_height_inches: Math.round(targetHeight * 100) / 100,
-    source_dpi_at_target: Math.round(effectiveDpi),
-    quality_warning: qualityWarning,
-    auto_resized: wasScaled,
+    target_width_inches: Math.round(actualWidthInches * 100) / 100,
+    target_height_inches: Math.round(actualHeightInches * 100) / 100,
+    source_dpi_at_target: dpi,
+    quality_warning: null,
+    auto_resized: false,
   }
 }
 

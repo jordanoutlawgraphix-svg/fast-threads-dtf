@@ -8,15 +8,39 @@ import {
   PLACEMENT_LABELS,
   LOCATIONS,
   SubmissionItemData,
+  DEFAULT_SIZE_PROFILES,
 } from '@/types'
 import {
   calculateTargetSize,
-  calculateYouthFromAdult,
   detectImageDimensions,
   validateItemSizing,
 } from '@/lib/sizing-engine'
 import * as store from '@/lib/store'
 import { isPDF, convertPDFToImage } from '@/lib/pdf-converter'
+
+// Placement codes for auto-naming items
+const PLACEMENT_CODES: Record<PlacementType, string> = {
+  left_chest: 'LC',
+  full_front: 'FF',
+  full_back: 'FB',
+  sleeve_left: 'SL',
+  sleeve_right: 'SR',
+  numbers: 'NUM',
+  names: 'NAM',
+  custom: 'CST',
+}
+
+/** Generate a dynamic item label like "38192-FF 11x5 4QTY" */
+function getItemLabel(invoiceNumber: string, item: SubmissionItemData): string {
+  const inv = invoiceNumber.trim() || '???'
+  const code = PLACEMENT_CODES[item.placement] || item.placement
+  const age = item.garment_age === 'youth' ? ' YTH' : ''
+  const w = item.confirmed_width_inches || 0
+  const h = item.confirmed_height_inches || 0
+  const size = w > 0 && h > 0 ? ` ${w}x${h}` : ''
+  const qty = item.quantity > 0 ? ` ${item.quantity}QTY` : ''
+  return `${inv}-${code}${age}${size}${qty}`
+}
 
 const EMPTY_ITEM: SubmissionItemData = {
   file: null,
@@ -58,6 +82,20 @@ export default function SubmitJobPage() {
   const removeItem = (index: number) => {
     if (items.length <= 1) return
     setItems(prev => prev.filter((_, i) => i !== index))
+  }
+
+  const duplicateItem = (index: number, asYouth: boolean) => {
+    const source = items[index]
+    const newItem: SubmissionItemData = {
+      ...source,
+      garment_age: asYouth ? 'youth' : source.garment_age,
+      size_confirmed: false,
+    }
+    setItems(prev => {
+      const updated = [...prev]
+      updated.splice(index + 1, 0, newItem)
+      return updated
+    })
   }
 
   const handleFileChange = async (index: number, file: File | null) => {
@@ -105,43 +143,15 @@ export default function SubmitJobPage() {
   }
 
   const handlePlacementChange = (index: number, placement: PlacementType) => {
-    const item = items[index]
-    if (item.detected_width_px > 0) {
-      const sizing = calculateTargetSize(item.detected_width_px, item.detected_height_px, 300, placement, item.garment_age)
-      updateItem(index, {
-        placement,
-        suggested_width_inches: sizing.target_width_inches,
-        suggested_height_inches: sizing.target_height_inches,
-        confirmed_width_inches: sizing.target_width_inches,
-        confirmed_height_inches: sizing.target_height_inches,
-        size_confirmed: false,
-      })
-    } else {
-      updateItem(index, { placement })
-    }
+    // Changing placement never changes dimensions — files are pre-sized.
+    // Just update placement and let validation warn if it exceeds the recommendation.
+    updateItem(index, { placement, size_confirmed: false })
   }
 
   const handleAgeChange = (index: number, garmentAge: GarmentAge) => {
-    const item = items[index]
-    if (item.detected_width_px > 0) {
-      let sizing
-      if (garmentAge === 'youth' && item.garment_age === 'adult' && item.confirmed_width_inches > 0) {
-        const youthSize = calculateYouthFromAdult(item.confirmed_width_inches, item.confirmed_height_inches, item.placement)
-        sizing = { target_width_inches: youthSize.width, target_height_inches: youthSize.height }
-      } else {
-        sizing = calculateTargetSize(item.detected_width_px, item.detected_height_px, 300, item.placement, garmentAge)
-      }
-      updateItem(index, {
-        garment_age: garmentAge,
-        suggested_width_inches: sizing.target_width_inches,
-        suggested_height_inches: sizing.target_height_inches,
-        confirmed_width_inches: sizing.target_width_inches,
-        confirmed_height_inches: sizing.target_height_inches,
-        size_confirmed: false,
-      })
-    } else {
-      updateItem(index, { garment_age: garmentAge })
-    }
+    // Changing garment age doesn't change dimensions — files are pre-sized.
+    // Just update the age flag and let validation handle warnings.
+    updateItem(index, { garment_age: garmentAge, size_confirmed: false })
   }
 
   const handleSubmit = async () => {
@@ -311,8 +321,8 @@ export default function SubmitJobPage() {
       {/* Print Items */}
       <div className="space-y-6 mb-6">
         {items.map((item, index) => (
-          <ItemForm key={index} index={index} item={item} onUpdate={updateItem} onFileChange={handleFileChange}
-            onPlacementChange={handlePlacementChange} onAgeChange={handleAgeChange} onRemove={removeItem} canRemove={items.length > 1} />
+          <ItemForm key={index} index={index} item={item} invoiceNumber={invoiceNumber} onUpdate={updateItem} onFileChange={handleFileChange}
+            onPlacementChange={handlePlacementChange} onAgeChange={handleAgeChange} onRemove={removeItem} onDuplicate={duplicateItem} canRemove={items.length > 1} />
         ))}
       </div>
 
@@ -338,10 +348,10 @@ export default function SubmitJobPage() {
   )
 }
 
-function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAgeChange, onRemove, canRemove }: {
-  index: number; item: SubmissionItemData; onUpdate: (i: number, u: Partial<SubmissionItemData>) => void
+function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacementChange, onAgeChange, onRemove, onDuplicate, canRemove }: {
+  index: number; item: SubmissionItemData; invoiceNumber: string; onUpdate: (i: number, u: Partial<SubmissionItemData>) => void
   onFileChange: (i: number, f: File | null) => void; onPlacementChange: (i: number, p: PlacementType) => void
-  onAgeChange: (i: number, a: GarmentAge) => void; onRemove: (i: number) => void; canRemove: boolean
+  onAgeChange: (i: number, a: GarmentAge) => void; onRemove: (i: number) => void; onDuplicate: (i: number, asYouth: boolean) => void; canRemove: boolean
 }) {
   const validation = item.detected_width_px > 0
     ? validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)
@@ -391,8 +401,21 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold">Print Item #{index + 1}</h3>
-        {canRemove && <button onClick={() => onRemove(index)} className="text-sm text-red-400 hover:text-red-300">Remove</button>}
+        <div>
+          <h3 className="font-semibold">Print Item #{index + 1}</h3>
+          {item.file && item.confirmed_width_inches > 0 && (
+            <p className="text-xs text-orange-400 font-mono mt-1">{getItemLabel(invoiceNumber, item)}</p>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {item.file && (
+            <button onClick={() => onDuplicate(index, item.garment_age === 'adult')}
+              className="text-xs px-2 py-1 bg-blue-900/40 border border-blue-700/50 text-blue-300 rounded hover:bg-blue-800/40 transition-colors">
+              {item.garment_age === 'adult' ? '+ Duplicate as Youth' : '+ Duplicate as Adult'}
+            </button>
+          )}
+          {canRemove && <button onClick={() => onRemove(index)} className="text-sm text-red-400 hover:text-red-300">Remove</button>}
+        </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
@@ -484,7 +507,10 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
                     className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-orange-500" />
                 </div>
               </div>
-              <p className="text-xs text-gray-500 mt-2">Suggested: {item.suggested_width_inches}&quot; x {item.suggested_height_inches}&quot;</p>
+              <p className="text-xs text-gray-500 mt-2">Placement max: {(() => {
+                const p = DEFAULT_SIZE_PROFILES.find(sp => sp.placement === item.placement && sp.garment_age === item.garment_age)
+                return p ? `${p.width_inches}" x ${p.height_inches}"` : 'N/A'
+              })()}</p>
               {validation && validation.warnings.length > 0 && (
                 <div className="mt-2">{validation.warnings.map((w, i) => (<p key={i} className="text-xs text-yellow-400 mt-1">{w}</p>))}</div>
               )}

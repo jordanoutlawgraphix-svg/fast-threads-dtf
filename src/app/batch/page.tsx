@@ -40,6 +40,8 @@ export default function BatchPage() {
     else setSelectedItems(new Set(unbatchedItems.map(i => i.id)))
   }
 
+  const [previewImageUrls, setPreviewImageUrls] = useState<Record<string, string>>({})
+
   const previewGangSheet = () => {
     const printItems: PrintItem[] = unbatchedItems
       .filter(i => selectedItems.has(i.id))
@@ -53,10 +55,18 @@ export default function BatchPage() {
         thumbnail_url: i.file_path ? store.getFileUrl(i.file_path) : undefined,
       }))
     if (printItems.length === 0) return
+
+    // Build image URL lookup for preview    const imageMap: Record<string, string> = {}
+    for (const p of printItems) {
+      if (p.thumbnail_url) imageMap[p.id] = p.thumbnail_url
+    }
+    setPreviewImageUrls(imageMap)
+
     const nextBatchNum = batches.length > 0 ? Math.max(...batches.map(b => b.batch_number)) + 1 : 1
     const layout = layoutGangSheetOptimized(printItems, nextBatchNum, DEFAULT_GANG_SHEET_CONFIG)
     setPreviewLayout(layout)
   }
+
   const createBatch = async () => {
     if (!previewLayout) return
     setCreating(true)
@@ -75,8 +85,7 @@ export default function BatchPage() {
       // Create batch items
       const batchItemsToInsert = previewLayout.placed_items.map(placed => ({
         id: uuidv4(),
-        batch_id: batch.id,
-        job_item_id: placed.item_id,
+        batch_id: batch.id,        job_item_id: placed.item_id,
         x_position: placed.x,
         y_position: placed.y,
         print_width: placed.width,
@@ -85,7 +94,8 @@ export default function BatchPage() {
       await store.createBatchItems(batchItemsToInsert)
 
       // Mark jobs as batched
-      const selectedJobItems = unbatchedItems.filter(i => selectedItems.has(i.id))      const jobIds = new Set(selectedJobItems.map(i => i.job_id))
+      const selectedJobItems = unbatchedItems.filter(i => selectedItems.has(i.id))
+      const jobIds = new Set(selectedJobItems.map(i => i.job_id))
       await Promise.all(Array.from(jobIds).map(jid => store.updateJobStatus(jid, 'batched')))
 
       setSelectedItems(new Set())
@@ -105,7 +115,6 @@ export default function BatchPage() {
     setConfirmDeleteBatch(null)
     await refreshData()
   }
-
   const statusColors: Record<string, string> = {
     building: 'bg-yellow-500/20 text-yellow-300',
     ready: 'bg-blue-500/20 text-blue-300',
@@ -113,6 +122,7 @@ export default function BatchPage() {
     printed: 'bg-green-500/20 text-green-300',
     complete: 'bg-gray-500/20 text-gray-300',
   }
+
   return (
     <div>
       <h1 className="text-2xl font-bold mb-6">Batch Management</h1>
@@ -135,14 +145,14 @@ export default function BatchPage() {
             <div className="text-center py-8 text-gray-500 bg-gray-900 border border-gray-800 rounded-lg">Loading...</div>
           ) : unbatchedItems.length === 0 ? (
             <div className="text-center py-8 text-gray-500 bg-gray-900 border border-gray-800 rounded-lg">
-              <p>No unbatched items. Submit jobs to get started.</p>
-            </div>
+              <p>No unbatched items. Submit jobs to get started.</p>            </div>
           ) : (
             <div className="space-y-2 max-h-[600px] overflow-y-auto">
               {unbatchedItems.map(item => {
                 const thumbUrl = item.file_path ? store.getFileUrl(item.file_path) : null
                 return (
-                  <label key={item.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${                    selectedItems.has(item.id) ? 'bg-orange-900/20 border border-orange-800/50' : 'bg-gray-900 border border-gray-800 hover:bg-gray-800/70'
+                  <label key={item.id} className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
+                    selectedItems.has(item.id) ? 'bg-orange-900/20 border border-orange-800/50' : 'bg-gray-900 border border-gray-800 hover:bg-gray-800/70'
                   }`}>
                     <input type="checkbox" checked={selectedItems.has(item.id)} onChange={() => toggleItem(item.id)} className="w-4 h-4 accent-orange-500" />
                     {thumbUrl && <img src={thumbUrl} alt="" className="w-10 h-10 object-contain bg-gray-700 rounded" />}
@@ -165,14 +175,14 @@ export default function BatchPage() {
           {previewLayout ? (
             <div>
               <h2 className="font-semibold mb-3">Gang Sheet Preview — Batch #{previewLayout.batch_number}</h2>
-              <GangSheetPreview layout={previewLayout} />
-              <div className="mt-4 flex gap-3">
+              <GangSheetPreview layout={previewLayout} imageUrls={previewImageUrls} />              <div className="mt-4 flex gap-3">
                 <button onClick={createBatch} disabled={creating}
                   className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium disabled:opacity-50">
                   {creating ? 'Creating...' : 'Create Batch'}
                 </button>
                 <button onClick={() => setPreviewLayout(null)} className="px-4 py-2 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 text-sm">Cancel</button>
-              </div>            </div>
+              </div>
+            </div>
           ) : (
             <div>
               <h2 className="font-semibold mb-3">Recent Batches</h2>
@@ -195,14 +205,14 @@ export default function BatchPage() {
                           </div>
                           <div className="flex items-center gap-3">
                             <span className={`px-2 py-1 rounded text-xs font-medium ${statusColors[batch.status]}`}>{batch.status.toUpperCase()}</span>
-                            <span className="text-xs text-gray-500">{new Date(batch.created_at).toLocaleDateString()}</span>
-                          </div>
+                            <span className="text-xs text-gray-500">{new Date(batch.created_at).toLocaleDateString()}</span>                          </div>
                         </Link>
                         {canDelete && (
                           confirmDeleteBatch === batch.id ? (
                             <div className="flex flex-col gap-1">
                               <button onClick={(e) => handleDeleteBatch(batch.id, e)} className="px-3 py-1.5 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">Delete</button>
-                              <button onClick={() => setConfirmDeleteBatch(null)} className="px-3 py-1.5 bg-gray-700 text-gray-300 rounded text-xs hover:bg-gray-600">Cancel</button>                            </div>
+                              <button onClick={() => setConfirmDeleteBatch(null)} className="px-3 py-1.5 bg-gray-700 text-gray-300 rounded text-xs hover:bg-gray-600">Cancel</button>
+                            </div>
                           ) : (
                             <button onClick={() => setConfirmDeleteBatch(batch.id)}
                               className="px-2 py-2 text-red-400/60 hover:text-red-400 hover:bg-red-900/20 rounded transition-colors" title="Delete batch">
@@ -225,31 +235,51 @@ export default function BatchPage() {
   )
 }
 
-function GangSheetPreview({ layout }: { layout: ReturnType<typeof layoutGangSheetOptimized> }) {
+function GangSheetPreview({ layout, imageUrls = {} }: { layout: ReturnType<typeof layoutGangSheetOptimized>; imageUrls?: Record<string, string> }) {
   const scale = 20
-  const svgWidth = layout.sheet_width * scale
-  const svgHeight = layout.sheet_height * scale
+  const svgWidth = layout.sheet_width * scale  const svgHeight = layout.sheet_height * scale
+  const checkerSize = 4
 
   return (
     <div className="bg-gray-800 rounded-lg p-4 overflow-auto">
       <div className="flex items-center justify-between mb-2">
-        <p className="text-xs text-gray-400">          {layout.sheet_width}&quot; x {layout.sheet_height}&quot; | {layout.total_items} prints | {layout.utilization_percent}% utilization
+        <p className="text-xs text-gray-400">
+          {layout.sheet_width}&quot; x {layout.sheet_height}&quot; | {layout.total_items} prints | {layout.utilization_percent}% utilization
         </p>
       </div>
       <div className="overflow-auto border border-gray-700 rounded" style={{ maxHeight: '500px' }}>
-        <svg width={svgWidth} height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`} className="bg-white">
+        <svg width={svgWidth} height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`}>
+          {/* Checkered background pattern so white artwork is visible */}
+          <defs>
+            <pattern id="checker" width={checkerSize * 2} height={checkerSize * 2} patternUnits="userSpaceOnUse">
+              <rect width={checkerSize * 2} height={checkerSize * 2} fill="#f0f0f0" />
+              <rect width={checkerSize} height={checkerSize} fill="#ffffff" />
+              <rect x={checkerSize} y={checkerSize} width={checkerSize} height={checkerSize} fill="#ffffff" />
+            </pattern>
+          </defs>
+          <rect width={svgWidth} height={svgHeight} fill="url(#checker)" />
           <rect x={0} y={0} width={svgWidth} height={10 * scale / 20} fill="#f97316" />
           <text x={svgWidth / 2} y={8} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">START BATCH #{layout.batch_number}</text>
-          {layout.placed_items.map((item, i) => (
-            <g key={i}>
-              <rect x={item.x * scale} y={item.y * scale} width={item.width * scale} height={item.height * scale}
-                fill="#e5e7eb" stroke="#9ca3af" strokeWidth={0.5} rx={2} />
-              <text x={item.x * scale + (item.width * scale) / 2} y={item.y * scale + (item.height * scale) / 2}
-                textAnchor="middle" dominantBaseline="middle" fill="#374151" fontSize={Math.min(6, item.width * scale / 10)}>
-                {item.invoice_number}
-              </text>
-            </g>
-          ))}
+          {layout.placed_items.map((item, i) => {
+            const x = item.x * scale
+            const y = item.y * scale
+            const w = item.width * scale
+            const h = item.height * scale
+            const imgUrl = imageUrls[item.item_id]
+            return (
+              <g key={i}>                {imgUrl ? (
+                  <image href={imgUrl} x={x} y={y} width={w} height={h} preserveAspectRatio="xMidYMid meet" />
+                ) : (
+                  <rect x={x} y={y} width={w} height={h} fill="#e5e7eb" rx={1} />
+                )}
+                <rect x={x} y={y} width={w} height={h} fill="none" stroke="#9ca3af" strokeWidth={0.5} />
+                <text x={x + w / 2} y={y + h - 2} textAnchor="middle" fill="#374151" fontSize={Math.min(5, w / 12)} fontWeight="bold"
+                  style={{ textShadow: '0 0 2px white, 0 0 2px white' }}>
+                  {item.invoice_number}
+                </text>
+              </g>
+            )
+          })}
           <rect x={0} y={svgHeight - 10} width={svgWidth} height={10} fill="#f97316" />
           <text x={svgWidth / 2} y={svgHeight - 3} textAnchor="middle" fill="white" fontSize="7" fontWeight="bold">END BATCH #{layout.batch_number}</text>
         </svg>

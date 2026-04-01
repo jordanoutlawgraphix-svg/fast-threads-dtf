@@ -26,8 +26,8 @@ const EMPTY_ITEM: SubmissionItemData = {
   custom_placement_name: '',
   detected_width_px: 0,
   detected_height_px: 0,
-  suggested_width_inches: 0,  suggested_height_inches: 0,
-  confirmed_width_inches: 0,
+  suggested_width_inches: 0,
+  suggested_height_inches: 0,  confirmed_width_inches: 0,
   confirmed_height_inches: 0,
   size_confirmed: false,
 }
@@ -48,12 +48,14 @@ export default function SubmitJobPage() {
   const [dueDate, setDueDate] = useState('')
   const errorRef = useRef<HTMLDivElement>(null)
 
+  // Auto-scroll to error banner when a validation error is set
   useEffect(() => {
     if (error && errorRef.current) {
       errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
   }, [error])
 
+  // Auto-dismiss toast after 4 seconds
   useEffect(() => {
     if (validationToast) {      const timer = setTimeout(() => setValidationToast(null), 4000)
       return () => clearTimeout(timer)
@@ -80,14 +82,17 @@ export default function SubmitJobPage() {
       updateItem(index, { file: null, detected_width_px: 0, detected_height_px: 0 })
       return
     }
+
+    // Convert PDF to PNG automatically
     let processedFile = file
     if (isPDF(file)) {
       try {
-        processedFile = await convertPDFToImage(file)
-      } catch {        setError('Failed to convert PDF. Make sure it contains at least one page.')
+        processedFile = await convertPDFToImage(file)      } catch {
+        setError('Failed to convert PDF. Make sure it contains at least one page.')
         return
       }
     }
+
     const validTypes = ['image/png', 'image/jpeg', 'image/tiff', 'image/webp']
     if (!validTypes.includes(processedFile.type)) {
       setError(`Invalid file type: ${file.type}. Please use PNG, JPG, TIFF, WebP, or PDF.`)
@@ -99,9 +104,13 @@ export default function SubmitJobPage() {
       const item = items[index]
       const sizing = calculateTargetSize(dims.width, dims.height, 300, item.placement, item.garment_age)
       updateItem(index, {
-        file, detected_width_px: dims.width, detected_height_px: dims.height,
-        suggested_width_inches: sizing.target_width_inches, suggested_height_inches: sizing.target_height_inches,
-        confirmed_width_inches: sizing.target_width_inches, confirmed_height_inches: sizing.target_height_inches,
+        file,
+        detected_width_px: dims.width,
+        detected_height_px: dims.height,
+        suggested_width_inches: sizing.target_width_inches,
+        suggested_height_inches: sizing.target_height_inches,
+        confirmed_width_inches: sizing.target_width_inches,
+        confirmed_height_inches: sizing.target_height_inches,
         size_confirmed: false,
       })
       setError(null)
@@ -109,15 +118,21 @@ export default function SubmitJobPage() {
       setError('Failed to read image dimensions. Please try a different file.')
     }
   }
-
   const handlePlacementChange = (index: number, placement: PlacementType) => {
     const item = items[index]
     if (item.detected_width_px > 0) {
-      const sizing = calculateTargetSize(item.detected_width_px, item.detected_height_px, 300, placement, item.garment_age)      updateItem(index, {
-        placement, suggested_width_inches: sizing.target_width_inches, suggested_height_inches: sizing.target_height_inches,
-        confirmed_width_inches: sizing.target_width_inches, confirmed_height_inches: sizing.target_height_inches, size_confirmed: false,
+      const sizing = calculateTargetSize(item.detected_width_px, item.detected_height_px, 300, placement, item.garment_age)
+      updateItem(index, {
+        placement,
+        suggested_width_inches: sizing.target_width_inches,
+        suggested_height_inches: sizing.target_height_inches,
+        confirmed_width_inches: sizing.target_width_inches,
+        confirmed_height_inches: sizing.target_height_inches,
+        size_confirmed: false,
       })
-    } else { updateItem(index, { placement }) }
+    } else {
+      updateItem(index, { placement })
+    }
   }
 
   const handleAgeChange = (index: number, garmentAge: GarmentAge) => {
@@ -131,10 +146,15 @@ export default function SubmitJobPage() {
         sizing = calculateTargetSize(item.detected_width_px, item.detected_height_px, 300, item.placement, garmentAge)
       }
       updateItem(index, {
-        garment_age: garmentAge, suggested_width_inches: sizing.target_width_inches, suggested_height_inches: sizing.target_height_inches,
-        confirmed_width_inches: sizing.target_width_inches, confirmed_height_inches: sizing.target_height_inches, size_confirmed: false,
+        garment_age: garmentAge,        suggested_width_inches: sizing.target_width_inches,
+        suggested_height_inches: sizing.target_height_inches,
+        confirmed_width_inches: sizing.target_width_inches,
+        confirmed_height_inches: sizing.target_height_inches,
+        size_confirmed: false,
       })
-    } else { updateItem(index, { garment_age: garmentAge }) }
+    } else {
+      updateItem(index, { garment_age: garmentAge })
+    }
   }
 
   const handleSubmit = async () => {
@@ -143,7 +163,8 @@ export default function SubmitJobPage() {
       setValidationToast(msg)
     }
 
-    if (!invoiceNumber.trim()) { showValidationError('Invoice number is required.'); return }    if (!submitterName.trim()) { showValidationError('Your name is required.'); return }
+    if (!invoiceNumber.trim()) { showValidationError('Invoice number is required.'); return }
+    if (!submitterName.trim()) { showValidationError('Your name is required.'); return }
     if (isRush && !dueDate) { showValidationError('Please select a due date for this rush job.'); return }
     if (hasYouthGarments === null) { showValidationError('Please answer: Are there youth garments in this order?'); return }
     if (hasYouthGarments && !youthConfirmed) { showValidationError('Please confirm that you have added separate items for youth sizes.'); return }
@@ -154,8 +175,7 @@ export default function SubmitJobPage() {
       if (item.quantity < 1) { showValidationError(`Item ${i + 1}: Quantity must be at least 1.`); return }
       if (!item.size_confirmed) { showValidationError(`Item ${i + 1}: Please confirm the print size.`); return }
       if (item.placement === 'custom' && !item.custom_placement_name.trim()) { showValidationError(`Item ${i + 1}: Please specify the custom placement name.`); return }
-      const validation = validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)
-      if (!validation.valid) { showValidationError(`Item ${i + 1}: ${validation.errors.join(' ')}`); return }
+      const validation = validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)      if (!validation.valid) { showValidationError(`Item ${i + 1}: ${validation.errors.join(' ')}`); return }
     }
 
     setSubmitting(true)
@@ -172,7 +192,8 @@ export default function SubmitJobPage() {
         location_code: location.code,
         submitter_name: submitterName.trim(),
         status: 'submitted',
-        notes: notes.trim() || null,        is_rush: isRush,
+        notes: notes.trim() || null,
+        is_rush: isRush,
         due_date: isRush ? dueDate : null,
       })
 
@@ -182,14 +203,27 @@ export default function SubmitJobPage() {
         const itemId = uuidv4()
         const ext = item.file!.name.split('.').pop() || 'png'
         const filePath = `jobs/${jobId}/${itemId}.${ext}`
+
+        // Upload file to Supabase Storage
         const fileUrl = await store.uploadFile(item.file!, filePath)
         await store.createJobItem({
-          id: itemId, job_id: jobId, placement: item.placement, garment_age: item.garment_age,
-          quantity: item.quantity, original_filename: item.file!.name, file_path: filePath, thumbnail_path: filePath,
-          source_width_px: item.detected_width_px, source_height_px: item.detected_height_px, source_dpi: 300,
-          target_width_inches: item.confirmed_width_inches, target_height_inches: item.confirmed_height_inches,
-          size_auto: true, size_confirmed: item.size_confirmed,
-          custom_placement_name: item.placement === 'custom' ? item.custom_placement_name : null, notes: null,
+          id: itemId,
+          job_id: jobId,
+          placement: item.placement,
+          garment_age: item.garment_age,
+          quantity: item.quantity,
+          original_filename: item.file!.name,
+          file_path: filePath,
+          thumbnail_path: filePath,
+          source_width_px: item.detected_width_px,
+          source_height_px: item.detected_height_px,
+          source_dpi: 300,
+          target_width_inches: item.confirmed_width_inches,
+          target_height_inches: item.confirmed_height_inches,
+          size_auto: true,
+          size_confirmed: item.size_confirmed,
+          custom_placement_name: item.placement === 'custom' ? item.custom_placement_name : null,
+          notes: null,
         })
       }
 
@@ -209,6 +243,7 @@ export default function SubmitJobPage() {
             }),
           })
         } catch {
+          // Don't block submission if email fails
           console.error('Rush notification email failed')
         }
       }
@@ -229,9 +264,9 @@ export default function SubmitJobPage() {
           <svg className="w-8 h-8 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
-        </div>
-        <h2 className="text-xl font-bold mb-2">Job Submitted Successfully!</h2>
-        <p className="text-gray-400 mb-6">Invoice #{invoiceNumber} has been added to the print queue.</p>        <div className="flex gap-4 justify-center">
+        </div>        <h2 className="text-xl font-bold mb-2">Job Submitted Successfully!</h2>
+        <p className="text-gray-400 mb-6">Invoice #{invoiceNumber} has been added to the print queue.</p>
+        <div className="flex gap-4 justify-center">
           <button
             onClick={() => { setSubmitted(false); setInvoiceNumber(''); setNotes(''); setItems([{ ...EMPTY_ITEM }]); setHasYouthGarments(null); setYouthConfirmed(false); setIsRush(false); setDueDate('') }}
             className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
@@ -259,8 +294,8 @@ export default function SubmitJobPage() {
             type="checkbox"
             checked={isRush}
             onChange={e => { setIsRush(e.target.checked); if (!e.target.checked) setDueDate('') }}
-            className="w-5 h-5 accent-red-500"
-          />          <div>
+            className="w-5 h-5 accent-red-500"          />
+          <div>
             <span className={`font-semibold ${isRush ? 'text-red-300' : 'text-gray-200'}`}>
               RUSH JOB
             </span>
@@ -317,8 +352,8 @@ export default function SubmitJobPage() {
           youth sizing — adult prints do not automatically fit youth garments correctly.
         </p>
         <div className="flex gap-4">
-          <button onClick={() => { setHasYouthGarments(true); setYouthConfirmed(false) }}            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${hasYouthGarments === true ? 'bg-yellow-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
-            Yes, there are youth garments
+          <button onClick={() => { setHasYouthGarments(true); setYouthConfirmed(false) }}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${hasYouthGarments === true ? 'bg-yellow-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>            Yes, there are youth garments
           </button>
           <button onClick={() => { setHasYouthGarments(false); setYouthConfirmed(false) }}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${hasYouthGarments === false ? 'bg-green-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
@@ -347,8 +382,8 @@ export default function SubmitJobPage() {
         ))}
       </div>
 
-      <div className="flex gap-4 mb-8">        <button onClick={addItem} className="px-4 py-2 bg-gray-800 border border-gray-700 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors text-sm">
-          + Add Another Print
+      <div className="flex gap-4 mb-8">
+        <button onClick={addItem} className="px-4 py-2 bg-gray-800 border border-gray-700 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors text-sm">          + Add Another Print
         </button>
       </div>
 
@@ -365,6 +400,7 @@ export default function SubmitJobPage() {
             {submitting ? 'Submitting...' : 'Submit Job'}
           </button>
         </div>
+        {/* Validation toast near submit button */}
         {validationToast && (
           <div className="absolute bottom-full right-0 mb-3 max-w-md animate-bounce-once">
             <div className="bg-red-600 text-white text-sm font-medium px-4 py-3 rounded-lg shadow-lg flex items-center gap-2">
@@ -376,9 +412,9 @@ export default function SubmitJobPage() {
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
-              </button>            </div>
-            <div className="absolute bottom-0 right-8 translate-y-1/2 w-3 h-3 bg-red-600 rotate-45"></div>
-          </div>
+              </button>
+            </div>
+            <div className="absolute bottom-0 right-8 translate-y-1/2 w-3 h-3 bg-red-600 rotate-45"></div>          </div>
         )}
       </div>
     </div>
@@ -397,9 +433,20 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
   const [dragging, setDragging] = useState(false)
 
   const processFile = async (file: File | null) => {
-    if (file) { setPreviewUrl(URL.createObjectURL(file)) } else { setPreviewUrl(null) }
+    if (!file) { setPreviewUrl(null); await onFileChange(index, null); return }
+    // onFileChange converts PDFs to PNG — wait for it, then use the converted file for preview
     await onFileChange(index, file)
   }
+
+  // Update preview whenever the item's file changes (after PDF conversion)
+  useEffect(() => {
+    if (item.file) {
+      const url = URL.createObjectURL(item.file)
+      setPreviewUrl(url)
+      return () => URL.revokeObjectURL(url)
+    } else {
+      setPreviewUrl(null)    }
+  }, [item.file])
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     await processFile(e.target.files?.[0] || null)
@@ -407,7 +454,8 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
 
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
-    setDragging(false)    const file = e.dataTransfer.files?.[0] || null
+    setDragging(false)
+    const file = e.dataTransfer.files?.[0] || null
     if (file) {
       const validTypes = ['image/png', 'image/jpeg', 'image/tiff', 'image/webp', 'application/pdf']
       if (validTypes.includes(file.type) || file.name.toLowerCase().endsWith('.pdf')) {
@@ -426,8 +474,7 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
         <h3 className="font-semibold">Print Item #{index + 1}</h3>
-        {canRemove && <button onClick={() => onRemove(index)} className="text-sm text-red-400 hover:text-red-300">Remove</button>}
-      </div>
+        {canRemove && <button onClick={() => onRemove(index)} className="text-sm text-red-400 hover:text-red-300">Remove</button>}      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
           <label className="block text-sm text-gray-400 mb-1">File *</label>
@@ -436,7 +483,8 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
               onDragOver={e => { e.preventDefault(); setDragging(true) }}
               onDragLeave={() => setDragging(false)}
               onDrop={handleDrop}
-              className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${                dragging
+              className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${
+                dragging
                   ? 'border-orange-500 bg-orange-900/20'
                   : 'border-gray-700 bg-gray-800/50 hover:border-gray-600'
               }`}
@@ -455,8 +503,7 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
                 <p className="text-xs text-gray-600 mt-1">or click to browse — PNG, JPG, TIFF, WebP, PDF</p>
               </div>
             </div>
-          ) : (
-            <div className="border border-gray-700 rounded-lg overflow-hidden bg-gray-800 p-2 relative">
+          ) : (            <div className="border border-gray-700 rounded-lg overflow-hidden bg-gray-800 p-2 relative">
               <img src={previewUrl} alt="Preview" className="max-h-40 mx-auto object-contain" />
               <button
                 onClick={clearFile}
@@ -465,7 +512,8 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
               >
                 X
               </button>
-            </div>          )}
+            </div>
+          )}
           {item.detected_width_px > 0 && <p className="mt-2 text-xs text-gray-500">Source: {item.detected_width_px} x {item.detected_height_px}px</p>}
         </div>
         <div className="space-y-4">
@@ -487,15 +535,15 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
             </div>
           </div>
           {item.placement === 'custom' && (
-            <div>
-              <label className="block text-sm text-gray-400 mb-1">Custom Placement Name *</label>
+            <div>              <label className="block text-sm text-gray-400 mb-1">Custom Placement Name *</label>
               <input type="text" value={item.custom_placement_name} onChange={e => onUpdate(index, { custom_placement_name: e.target.value })}
                 placeholder="e.g., Right hip, Hat front..."
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500" />
             </div>
           )}
           <div>
-            <label className="block text-sm text-gray-400 mb-1">Quantity *</label>            <input type="number" min={1} value={item.quantity} onChange={e => onUpdate(index, { quantity: parseInt(e.target.value) || 1 })}
+            <label className="block text-sm text-gray-400 mb-1">Quantity *</label>
+            <input type="number" min={1} value={item.quantity} onChange={e => onUpdate(index, { quantity: parseInt(e.target.value) || 1 })}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-orange-500" />
           </div>
           {item.detected_width_px > 0 && (
@@ -517,15 +565,15 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
               </div>
               <p className="text-xs text-gray-500 mt-2">Suggested: {item.suggested_width_inches}&quot; x {item.suggested_height_inches}&quot;</p>
               {validation && validation.warnings.length > 0 && (
-                <div className="mt-2">{validation.warnings.map((w, i) => (<p key={i} className="text-xs text-yellow-400 mt-1">{w}</p>))}</div>
-              )}
+                <div className="mt-2">{validation.warnings.map((w, i) => (<p key={i} className="text-xs text-yellow-400 mt-1">{w}</p>))}</div>              )}
               {validation && validation.errors.length > 0 && (
                 <div className="mt-2">{validation.errors.map((e, i) => (<p key={i} className="text-xs text-red-400 mt-1">{e}</p>))}</div>
               )}
               <label className="flex items-center gap-2 mt-3 cursor-pointer">
                 <input type="checkbox" checked={item.size_confirmed} onChange={e => onUpdate(index, { size_confirmed: e.target.checked })} className="w-4 h-4 accent-orange-500" />
                 <span className="text-sm text-gray-300">I confirm this print size is correct</span>
-              </label>            </div>
+              </label>
+            </div>
           )}
         </div>
       </div>

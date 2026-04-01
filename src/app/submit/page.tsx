@@ -105,12 +105,11 @@ export default function SubmitJobPage() {
       return
     }
 
-    // Track if this was a PDF so we can re-render at any size later
     let originalPdf: File | null = null
     let processedFile = file
 
     if (isPDF(file)) {
-      originalPdf = file // Keep the vector source
+      originalPdf = file
       try {
         processedFile = await convertPDFToImage(file)
       } catch (err) {
@@ -167,7 +166,6 @@ export default function SubmitJobPage() {
       if (item.quantity < 1) { setError(`Item ${i + 1}: Quantity must be at least 1.`); return }
       if (!item.size_confirmed) { setError(`Item ${i + 1}: Please confirm the print size.`); return }
       if (item.placement === 'custom' && !item.custom_placement_name.trim()) { setError(`Item ${i + 1}: Please specify the custom placement name.`); return }
-      // Skip DPI validation for PDF-sourced items (they'll be re-rendered at 300 DPI)
       if (!item.originalPdfFile) {
         const validation = validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)
         if (!validation.valid) { setError(`Item ${i + 1}: ${validation.errors.join(' ')}`); return }
@@ -196,8 +194,6 @@ export default function SubmitJobPage() {
       for (const item of items) {
         const itemId = uuidv4()
 
-        // If this item came from a PDF, re-render at the confirmed dimensions
-        // to get a perfect 300 DPI raster at the exact target size
         let uploadFile = item.file!
         if (item.originalPdfFile) {
           try {
@@ -209,17 +205,14 @@ export default function SubmitJobPage() {
             )
           } catch (err) {
             console.error('PDF re-render error:', err)
-            // Fall back to the preview PNG if re-render fails
           }
         }
 
         const ext = uploadFile.name.split('.').pop() || 'png'
         const filePath = `jobs/${jobId}/${itemId}.${ext}`
 
-        // Upload file to Supabase Storage
         const fileUrl = await store.uploadFile(uploadFile, filePath)
 
-        // For PDF-sourced items, the final file IS 300 DPI at the target size
         const finalWidthPx = item.originalPdfFile
           ? Math.round(item.confirmed_width_inches * 300)
           : item.detected_width_px
@@ -288,7 +281,6 @@ export default function SubmitJobPage() {
         <div className="mb-6 p-4 bg-red-900/30 border border-red-800/50 rounded-lg text-red-300 text-sm">{error}</div>
       )}
 
-      {/* Job Info */}
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
         <h2 className="font-semibold mb-4">Job Information</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -317,7 +309,6 @@ export default function SubmitJobPage() {
         </div>
       </div>
 
-      {/* Youth Garment Check */}
       <div className="bg-yellow-900/20 border border-yellow-800/50 rounded-lg p-6 mb-6">
         <h2 className="font-semibold mb-3 text-yellow-300">Youth Garment Check</h2>
         <p className="text-sm text-gray-300 mb-4">
@@ -348,7 +339,6 @@ export default function SubmitJobPage() {
         )}
       </div>
 
-      {/* Print Items */}
       <div className="space-y-6 mb-6">
         {items.map((item, index) => (
           <ItemForm key={index} index={index} item={item} invoiceNumber={invoiceNumber} onUpdate={updateItem} onFileChange={handleFileChange}
@@ -383,12 +373,10 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
   onFileChange: (i: number, f: File | null) => void; onPlacementChange: (i: number, p: PlacementType) => void
   onAgeChange: (i: number, a: GarmentAge) => void; onRemove: (i: number) => void; onDuplicate: (i: number, asYouth: boolean) => void; canRemove: boolean
 }) {
-  // For PDF-sourced items, skip DPI validation (will be re-rendered at 300 DPI on submit)
   const isVector = !!item.originalPdfFile
   const validation = item.detected_width_px > 0 && !isVector
     ? validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)
     : null
-  // For vector items, still check placement size limits
   const placementValidation = item.detected_width_px > 0 && isVector
     ? (() => {
         const profile = DEFAULT_SIZE_PROFILES.find(sp => sp.placement === item.placement && sp.garment_age === item.garment_age)
@@ -408,12 +396,44 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
 
+  // Aspect ratio from source file — used to lock proportions
+  const aspectRatio = item.detected_width_px > 0 && item.detected_height_px > 0
+    ? item.detected_width_px / item.detected_height_px
+    : 1
+
+  /** Change width and auto-calculate height to maintain aspect ratio */
+  const handleWidthChange = (newWidth: number) => {
+    if (newWidth <= 0) {
+      onUpdate(index, { confirmed_width_inches: newWidth, size_confirmed: false })
+      return
+    }
+    const newHeight = Math.round((newWidth / aspectRatio) * 100) / 100
+    onUpdate(index, {
+      confirmed_width_inches: newWidth,
+      confirmed_height_inches: newHeight,
+      size_confirmed: false,
+    })
+  }
+
+  /** Change height and auto-calculate width to maintain aspect ratio */
+  const handleHeightChange = (newHeight: number) => {
+    if (newHeight <= 0) {
+      onUpdate(index, { confirmed_height_inches: newHeight, size_confirmed: false })
+      return
+    }
+    const newWidth = Math.round((newHeight * aspectRatio) * 100) / 100
+    onUpdate(index, {
+      confirmed_width_inches: newWidth,
+      confirmed_height_inches: newHeight,
+      size_confirmed: false,
+    })
+  }
+
   const processFile = async (file: File | null) => {
     if (!file) { setPreviewUrl(null) }
     await onFileChange(index, file)
   }
 
-  // Generate preview URL from the actual stored file (the converted PNG, not the original PDF)
   useEffect(() => {
     if (item.file) {
       const url = URL.createObjectURL(item.file)
@@ -554,18 +574,21 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
           </div>
           {item.detected_width_px > 0 && (
             <div className="p-3 bg-gray-800 rounded-lg border border-gray-700">
-              <p className="text-sm font-medium mb-2">Print Size</p>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-sm font-medium">Print Size</p>
+                <span className="text-[10px] text-gray-500">Aspect ratio locked</span>
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Width (inches)</label>
                   <input type="number" step="0.25" min="0.5" value={item.confirmed_width_inches}
-                    onChange={e => onUpdate(index, { confirmed_width_inches: parseFloat(e.target.value) || 0, size_confirmed: false })}
+                    onChange={e => handleWidthChange(parseFloat(e.target.value) || 0)}
                     className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-orange-500" />
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Height (inches)</label>
                   <input type="number" step="0.25" min="0.5" value={item.confirmed_height_inches}
-                    onChange={e => onUpdate(index, { confirmed_height_inches: parseFloat(e.target.value) || 0, size_confirmed: false })}
+                    onChange={e => handleHeightChange(parseFloat(e.target.value) || 0)}
                     className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-orange-500" />
                 </div>
               </div>

@@ -16,6 +16,7 @@ import {
   validateItemSizing,
 } from '@/lib/sizing-engine'
 import * as store from '@/lib/store'
+import { isPDF, convertPDFToImage } from '@/lib/pdf-converter'
 
 const EMPTY_ITEM: SubmissionItemData = {
   file: null,
@@ -64,12 +65,25 @@ export default function SubmitJobPage() {
       updateItem(index, { file: null, detected_width_px: 0, detected_height_px: 0 })
       return
     }
+
+    // Convert PDF to PNG automatically
+    let processedFile = file
+    if (isPDF(file)) {
+      try {
+        processedFile = await convertPDFToImage(file)
+      } catch {
+        setError('Failed to convert PDF. Make sure it contains at least one page.')
+        return
+      }
+    }
+
     const validTypes = ['image/png', 'image/jpeg', 'image/tiff', 'image/webp']
-    if (!validTypes.includes(file.type)) {
-      setError(`Invalid file type: ${file.type}. Please use PNG, JPG, TIFF, or WebP.`)
+    if (!validTypes.includes(processedFile.type)) {
+      setError(`Invalid file type: ${file.type}. Please use PNG, JPG, TIFF, WebP, or PDF.`)
       return
     }
     try {
+      file = processedFile
       const dims = await detectImageDimensions(file)
       const item = items[index]
       const sizing = calculateTargetSize(dims.width, dims.height, 300, item.placement, item.garment_age)
@@ -307,7 +321,13 @@ export default function SubmitJobPage() {
         </button>
       </div>
 
-      <div className="flex justify-end">
+      <div className="flex justify-between">
+        <button
+          onClick={() => { setInvoiceNumber(''); setSubmitterName(''); setNotes(''); setItems([{ ...EMPTY_ITEM }]); setHasYouthGarments(null); setYouthConfirmed(false); setError(null) }}
+          className="px-6 py-3 bg-gray-800 border border-gray-700 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors font-medium"
+        >
+          Clear / Start Over
+        </button>
         <button onClick={handleSubmit} disabled={submitting}
           className="px-8 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
           {submitting ? 'Submitting...' : 'Submit Job'}
@@ -326,11 +346,33 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
     ? validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)
     : null
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [dragging, setDragging] = useState(false)
 
-  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null
+  const processFile = async (file: File | null) => {
     if (file) { setPreviewUrl(URL.createObjectURL(file)) } else { setPreviewUrl(null) }
     await onFileChange(index, file)
+  }
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    await processFile(e.target.files?.[0] || null)
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    setDragging(false)
+    const file = e.dataTransfer.files?.[0] || null
+    if (file) {
+      const validTypes = ['image/png', 'image/jpeg', 'image/tiff', 'image/webp', 'application/pdf']
+      if (validTypes.includes(file.type) || file.name.toLowerCase().endsWith('.pdf')) {
+        await processFile(file)
+      }
+    }
+  }
+
+  const clearFile = () => {
+    setPreviewUrl(null)
+    onFileChange(index, null)
+    onUpdate(index, { size_confirmed: false })
   }
 
   return (
@@ -342,11 +384,41 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
           <label className="block text-sm text-gray-400 mb-1">File *</label>
-          <input type="file" accept="image/png,image/jpeg,image/tiff,image/webp" onChange={handleFile}
-            className="w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-gray-800 file:text-gray-300 hover:file:bg-gray-700" />
-          {previewUrl && (
-            <div className="mt-3 border border-gray-700 rounded-lg overflow-hidden bg-gray-800 p-2">
+          {!previewUrl ? (
+            <div
+              onDragOver={e => { e.preventDefault(); setDragging(true) }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={handleDrop}
+              className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${
+                dragging
+                  ? 'border-orange-500 bg-orange-900/20'
+                  : 'border-gray-700 bg-gray-800/50 hover:border-gray-600'
+              }`}
+            >
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/tiff,image/webp,application/pdf,.pdf"
+                onChange={handleFile}
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              />
+              <div className="pointer-events-none">
+                <svg className="w-8 h-8 mx-auto text-gray-500 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                <p className="text-sm text-gray-400">Drag & drop file here</p>
+                <p className="text-xs text-gray-600 mt-1">or click to browse — PNG, JPG, TIFF, WebP, PDF</p>
+              </div>
+            </div>
+          ) : (
+            <div className="border border-gray-700 rounded-lg overflow-hidden bg-gray-800 p-2 relative">
               <img src={previewUrl} alt="Preview" className="max-h-40 mx-auto object-contain" />
+              <button
+                onClick={clearFile}
+                className="absolute top-1 right-1 w-6 h-6 bg-red-600 text-white rounded-full text-xs font-bold hover:bg-red-500 flex items-center justify-center"
+                title="Remove file"
+              >
+                X
+              </button>
             </div>
           )}
           {item.detected_width_px > 0 && <p className="mt-2 text-xs text-gray-500">Source: {item.detected_width_px} x {item.detected_height_px}px</p>}

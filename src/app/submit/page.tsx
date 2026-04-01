@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import {
   PlacementType,
@@ -350,9 +350,21 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
   const [dragging, setDragging] = useState(false)
 
   const processFile = async (file: File | null) => {
-    if (file) { setPreviewUrl(URL.createObjectURL(file)) } else { setPreviewUrl(null) }
+    if (!file) { setPreviewUrl(null) }
     await onFileChange(index, file)
   }
+
+  // Generate preview URL from the actual stored file (which is the converted PNG, not the original PDF)
+  // This runs whenever item.file changes
+  useEffect(() => {
+    if (item.file) {
+      const url = URL.createObjectURL(item.file)
+      setPreviewUrl(url)
+      return () => URL.revokeObjectURL(url)
+    } else {
+      setPreviewUrl(null)
+    }
+  }, [item.file])
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     await processFile(e.target.files?.[0] || null)

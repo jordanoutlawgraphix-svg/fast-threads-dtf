@@ -25,7 +25,7 @@ export function Navigation() {
           <div className="flex items-center justify-between h-14">
             <Link href="/" className="flex items-center gap-3">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/logo.png" alt="Fast Threads" className="h-8 w-auto" />
+              <img src="/ft-logo.png" alt="Fast Threads" className="h-8 w-auto" />
               <span className="text-gray-500 text-sm font-light">|</span>
               <span className="font-medium text-sm text-gray-300">DTF Manager</span>
             </Link>

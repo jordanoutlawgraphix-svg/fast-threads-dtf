@@ -1,0 +1,7 @@
+Fix logo: rename to bust browser/CDN cache of alpha-stripped version
+
+Browser was caching the old Next.js Image-optimized version that had
+the alpha channel stripped (white background). Renamed logo.png to
+ft-logo.png to force a fresh fetch of the correct transparent PNG.
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>

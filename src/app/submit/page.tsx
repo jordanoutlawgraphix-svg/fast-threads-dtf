@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import {
   PlacementType,
@@ -8,48 +8,22 @@ import {
   PLACEMENT_LABELS,
   LOCATIONS,
   SubmissionItemData,
-  DEFAULT_SIZE_PROFILES,
 } from '@/types'
 import {
   calculateTargetSize,
+  calculateYouthFromAdult,
   detectImageDimensions,
   validateItemSizing,
 } from '@/lib/sizing-engine'
 import * as store from '@/lib/store'
-import { isPDF, convertPDFToImage, renderPDFAtSize } from '@/lib/pdf-converter'
-
-// Placement codes for auto-naming items
-const PLACEMENT_CODES: Record<PlacementType, string> = {
-  left_chest: 'LC',
-  full_front: 'FF',
-  full_back: 'FB',
-  sleeve_left: 'SL',
-  sleeve_right: 'SR',
-  numbers: 'NUM',
-  names: 'NAM',
-  custom: 'CST',
-}
-
-/** Generate a dynamic item label like "38192-FF 11x5 4QTY" */
-function getItemLabel(invoiceNumber: string, item: SubmissionItemData): string {
-  const inv = invoiceNumber.trim() || '???'
-  const code = PLACEMENT_CODES[item.placement] || item.placement
-  const age = item.garment_age === 'youth' ? ' YTH' : ''
-  const w = item.confirmed_width_inches || 0
-  const h = item.confirmed_height_inches || 0
-  const size = w > 0 && h > 0 ? ` ${w}x${h}` : ''
-  const qty = item.quantity > 0 ? ` ${item.quantity}QTY` : ''
-  return `${inv}-${code}${age}${size}${qty}`
-}
+import { isPDF, convertPDFToImage } from '@/lib/pdf-converter'
 
 const EMPTY_ITEM: SubmissionItemData = {
   file: null,
-  originalPdfFile: null,
   placement: 'left_chest',
   garment_age: 'adult',
   quantity: 1,
-  custom_placement_name: '',
-  detected_width_px: 0,
+  custom_placement_name: '',  detected_width_px: 0,
   detected_height_px: 0,
   suggested_width_inches: 0,
   suggested_height_inches: 0,
@@ -69,6 +43,22 @@ export default function SubmitJobPage() {
   const [error, setError] = useState<string | null>(null)
   const [hasYouthGarments, setHasYouthGarments] = useState<boolean | null>(null)
   const [youthConfirmed, setYouthConfirmed] = useState(false)
+  const [validationToast, setValidationToast] = useState<string | null>(null)
+  const errorRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll to error banner when a validation error is set
+  useEffect(() => {
+    if (error && errorRef.current) {      errorRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
+  }, [error])
+
+  // Auto-dismiss toast after 4 seconds
+  useEffect(() => {
+    if (validationToast) {
+      const timer = setTimeout(() => setValidationToast(null), 4000)
+      return () => clearTimeout(timer)
+    }
+  }, [validationToast])
 
   const updateItem = useCallback((index: number, updates: Partial<SubmissionItemData>) => {
     setItems(prev => {
@@ -84,36 +74,18 @@ export default function SubmitJobPage() {
     if (items.length <= 1) return
     setItems(prev => prev.filter((_, i) => i !== index))
   }
-
-  const duplicateItem = (index: number, asYouth: boolean) => {
-    const source = items[index]
-    const newItem: SubmissionItemData = {
-      ...source,
-      garment_age: asYouth ? 'youth' : source.garment_age,
-      size_confirmed: false,
-    }
-    setItems(prev => {
-      const updated = [...prev]
-      updated.splice(index + 1, 0, newItem)
-      return updated
-    })
-  }
-
   const handleFileChange = async (index: number, file: File | null) => {
     if (!file) {
-      updateItem(index, { file: null, originalPdfFile: null, detected_width_px: 0, detected_height_px: 0 })
+      updateItem(index, { file: null, detected_width_px: 0, detected_height_px: 0 })
       return
     }
 
-    let originalPdf: File | null = null
+    // Convert PDF to PNG automatically
     let processedFile = file
-
     if (isPDF(file)) {
-      originalPdf = file
       try {
         processedFile = await convertPDFToImage(file)
-      } catch (err) {
-        console.error('PDF conversion error:', err)
+      } catch {
         setError('Failed to convert PDF. Make sure it contains at least one page.')
         return
       }
@@ -126,12 +98,10 @@ export default function SubmitJobPage() {
     }
     try {
       file = processedFile
-      const dims = await detectImageDimensions(file)
-      const item = items[index]
+      const dims = await detectImageDimensions(file)      const item = items[index]
       const sizing = calculateTargetSize(dims.width, dims.height, 300, item.placement, item.garment_age)
       updateItem(index, {
         file,
-        originalPdfFile: originalPdf,
         detected_width_px: dims.width,
         detected_height_px: dims.height,
         suggested_width_inches: sizing.target_width_inches,
@@ -147,29 +117,61 @@ export default function SubmitJobPage() {
   }
 
   const handlePlacementChange = (index: number, placement: PlacementType) => {
-    updateItem(index, { placement, size_confirmed: false })
+    const item = items[index]
+    if (item.detected_width_px > 0) {
+      const sizing = calculateTargetSize(item.detected_width_px, item.detected_height_px, 300, placement, item.garment_age)
+      updateItem(index, {
+        placement,
+        suggested_width_inches: sizing.target_width_inches,
+        suggested_height_inches: sizing.target_height_inches,        confirmed_width_inches: sizing.target_width_inches,
+        confirmed_height_inches: sizing.target_height_inches,
+        size_confirmed: false,
+      })
+    } else {
+      updateItem(index, { placement })
+    }
   }
 
   const handleAgeChange = (index: number, garmentAge: GarmentAge) => {
-    updateItem(index, { garment_age: garmentAge, size_confirmed: false })
+    const item = items[index]
+    if (item.detected_width_px > 0) {
+      let sizing
+      if (garmentAge === 'youth' && item.garment_age === 'adult' && item.confirmed_width_inches > 0) {
+        const youthSize = calculateYouthFromAdult(item.confirmed_width_inches, item.confirmed_height_inches, item.placement)
+        sizing = { target_width_inches: youthSize.width, target_height_inches: youthSize.height }
+      } else {
+        sizing = calculateTargetSize(item.detected_width_px, item.detected_height_px, 300, item.placement, garmentAge)
+      }
+      updateItem(index, {
+        garment_age: garmentAge,
+        suggested_width_inches: sizing.target_width_inches,
+        suggested_height_inches: sizing.target_height_inches,
+        confirmed_width_inches: sizing.target_width_inches,
+        confirmed_height_inches: sizing.target_height_inches,        size_confirmed: false,
+      })
+    } else {
+      updateItem(index, { garment_age: garmentAge })
+    }
   }
 
   const handleSubmit = async () => {
-    if (!invoiceNumber.trim()) { setError('Invoice number is required.'); return }
-    if (!submitterName.trim()) { setError('Your name is required.'); return }
-    if (hasYouthGarments === null) { setError('Please answer: Are there youth garments in this order?'); return }
-    if (hasYouthGarments && !youthConfirmed) { setError('Please confirm that you have added separate items for youth sizes.'); return }
+    const showValidationError = (msg: string) => {
+      setError(msg)
+      setValidationToast(msg)
+    }
+
+    if (!invoiceNumber.trim()) { showValidationError('Invoice number is required.'); return }
+    if (!submitterName.trim()) { showValidationError('Your name is required.'); return }
+    if (hasYouthGarments === null) { showValidationError('Please answer: Are there youth garments in this order?'); return }
+    if (hasYouthGarments && !youthConfirmed) { showValidationError('Please confirm that you have added separate items for youth sizes.'); return }
 
     for (let i = 0; i < items.length; i++) {
       const item = items[i]
-      if (!item.file) { setError(`Item ${i + 1}: Please upload a file.`); return }
-      if (item.quantity < 1) { setError(`Item ${i + 1}: Quantity must be at least 1.`); return }
-      if (!item.size_confirmed) { setError(`Item ${i + 1}: Please confirm the print size.`); return }
-      if (item.placement === 'custom' && !item.custom_placement_name.trim()) { setError(`Item ${i + 1}: Please specify the custom placement name.`); return }
-      if (!item.originalPdfFile) {
-        const validation = validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)
-        if (!validation.valid) { setError(`Item ${i + 1}: ${validation.errors.join(' ')}`); return }
-      }
+      if (!item.file) { showValidationError(`Item ${i + 1}: Please upload a file.`); return }
+      if (item.quantity < 1) { showValidationError(`Item ${i + 1}: Quantity must be at least 1.`); return }
+      if (!item.size_confirmed) { showValidationError(`Item ${i + 1}: Please confirm the print size.`); return }
+      if (item.placement === 'custom' && !item.custom_placement_name.trim()) { showValidationError(`Item ${i + 1}: Please specify the custom placement name.`); return }
+      const validation = validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)      if (!validation.valid) { showValidationError(`Item ${i + 1}: ${validation.errors.join(' ')}`); return }
     }
 
     setSubmitting(true)
@@ -193,32 +195,10 @@ export default function SubmitJobPage() {
 
       for (const item of items) {
         const itemId = uuidv4()
+        const ext = item.file!.name.split('.').pop() || 'png'        const filePath = `jobs/${jobId}/${itemId}.${ext}`
 
-        let uploadFile = item.file!
-        if (item.originalPdfFile) {
-          try {
-            uploadFile = await renderPDFAtSize(
-              item.originalPdfFile,
-              item.confirmed_width_inches,
-              item.confirmed_height_inches,
-              300
-            )
-          } catch (err) {
-            console.error('PDF re-render error:', err)
-          }
-        }
-
-        const ext = uploadFile.name.split('.').pop() || 'png'
-        const filePath = `jobs/${jobId}/${itemId}.${ext}`
-
-        const fileUrl = await store.uploadFile(uploadFile, filePath)
-
-        const finalWidthPx = item.originalPdfFile
-          ? Math.round(item.confirmed_width_inches * 300)
-          : item.detected_width_px
-        const finalHeightPx = item.originalPdfFile
-          ? Math.round(item.confirmed_height_inches * 300)
-          : item.detected_height_px
+        // Upload file to Supabase Storage
+        const fileUrl = await store.uploadFile(item.file!, filePath)
 
         await store.createJobItem({
           id: itemId,
@@ -226,11 +206,11 @@ export default function SubmitJobPage() {
           placement: item.placement,
           garment_age: item.garment_age,
           quantity: item.quantity,
-          original_filename: item.originalPdfFile ? item.originalPdfFile.name : item.file!.name,
+          original_filename: item.file!.name,
           file_path: filePath,
           thumbnail_path: filePath,
-          source_width_px: finalWidthPx,
-          source_height_px: finalHeightPx,
+          source_width_px: item.detected_width_px,
+          source_height_px: item.detected_height_px,
           source_dpi: 300,
           target_width_inches: item.confirmed_width_inches,
           target_height_inches: item.confirmed_height_inches,
@@ -240,7 +220,6 @@ export default function SubmitJobPage() {
           notes: null,
         })
       }
-
       setSubmitted(true)
     } catch (err) {
       console.error(err)
@@ -265,8 +244,7 @@ export default function SubmitJobPage() {
             onClick={() => { setSubmitted(false); setInvoiceNumber(''); setNotes(''); setItems([{ ...EMPTY_ITEM }]); setHasYouthGarments(null); setYouthConfirmed(false) }}
             className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
           >
-            Submit Another Job
-          </button>
+            Submit Another Job          </button>
           <a href="/queue" className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors">View Queue</a>
         </div>
       </div>
@@ -278,9 +256,10 @@ export default function SubmitJobPage() {
       <h1 className="text-2xl font-bold mb-6">Submit DTF Job</h1>
 
       {error && (
-        <div className="mb-6 p-4 bg-red-900/30 border border-red-800/50 rounded-lg text-red-300 text-sm">{error}</div>
+        <div ref={errorRef} className="mb-6 p-4 bg-red-900/30 border border-red-800/50 rounded-lg text-red-300 text-sm">{error}</div>
       )}
 
+      {/* Job Info */}
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
         <h2 className="font-semibold mb-4">Job Information</h2>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -289,8 +268,7 @@ export default function SubmitJobPage() {
             <input type="text" value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} placeholder="e.g., INV-2024-001"
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:border-orange-500" />
           </div>
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Location *</label>
+          <div>            <label className="block text-sm text-gray-400 mb-1">Location *</label>
             <select value={locationId} onChange={e => setLocationId(e.target.value)}
               className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:outline-none focus:border-orange-500">
               {LOCATIONS.map(loc => (<option key={loc.id} value={loc.id}>{loc.name}</option>))}
@@ -309,12 +287,12 @@ export default function SubmitJobPage() {
         </div>
       </div>
 
+      {/* Youth Garment Check */}
       <div className="bg-yellow-900/20 border border-yellow-800/50 rounded-lg p-6 mb-6">
         <h2 className="font-semibold mb-3 text-yellow-300">Youth Garment Check</h2>
         <p className="text-sm text-gray-300 mb-4">
           Does this order include any youth/kids garments? If yes, you MUST submit separate items with
-          youth sizing — adult prints do not automatically fit youth garments correctly.
-        </p>
+          youth sizing — adult prints do not automatically fit youth garments correctly.        </p>
         <div className="flex gap-4">
           <button onClick={() => { setHasYouthGarments(true); setYouthConfirmed(false) }}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${hasYouthGarments === true ? 'bg-yellow-600 text-white' : 'bg-gray-800 text-gray-300 hover:bg-gray-700'}`}>
@@ -339,10 +317,10 @@ export default function SubmitJobPage() {
         )}
       </div>
 
-      <div className="space-y-6 mb-6">
+      {/* Print Items */}      <div className="space-y-6 mb-6">
         {items.map((item, index) => (
-          <ItemForm key={index} index={index} item={item} invoiceNumber={invoiceNumber} onUpdate={updateItem} onFileChange={handleFileChange}
-            onPlacementChange={handlePlacementChange} onAgeChange={handleAgeChange} onRemove={removeItem} onDuplicate={duplicateItem} canRemove={items.length > 1} />
+          <ItemForm key={index} index={index} item={item} onUpdate={updateItem} onFileChange={handleFileChange}
+            onPlacementChange={handlePlacementChange} onAgeChange={handleAgeChange} onRemove={removeItem} canRemove={items.length > 1} />
         ))}
       </div>
 
@@ -352,97 +330,54 @@ export default function SubmitJobPage() {
         </button>
       </div>
 
-      <div className="flex justify-between">
-        <button
-          onClick={() => { setInvoiceNumber(''); setSubmitterName(''); setNotes(''); setItems([{ ...EMPTY_ITEM }]); setHasYouthGarments(null); setYouthConfirmed(false); setError(null) }}
-          className="px-6 py-3 bg-gray-800 border border-gray-700 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors font-medium"
-        >
-          Clear / Start Over
-        </button>
-        <button onClick={handleSubmit} disabled={submitting}
-          className="px-8 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
-          {submitting ? 'Submitting...' : 'Submit Job'}
-        </button>
+      <div className="relative">
+        <div className="flex justify-between">
+          <button
+            onClick={() => { setInvoiceNumber(''); setSubmitterName(''); setNotes(''); setItems([{ ...EMPTY_ITEM }]); setHasYouthGarments(null); setYouthConfirmed(false); setError(null); setValidationToast(null) }}
+            className="px-6 py-3 bg-gray-800 border border-gray-700 text-gray-300 rounded-lg hover:bg-gray-700 transition-colors font-medium"
+          >
+            Clear / Start Over
+          </button>
+          <button onClick={handleSubmit} disabled={submitting}
+            className="px-8 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors font-semibold disabled:opacity-50 disabled:cursor-not-allowed">
+            {submitting ? 'Submitting...' : 'Submit Job'}
+          </button>
+        </div>        {/* Validation toast near submit button */}
+        {validationToast && (
+          <div className="absolute bottom-full right-0 mb-3 max-w-md animate-bounce-once">
+            <div className="bg-red-600 text-white text-sm font-medium px-4 py-3 rounded-lg shadow-lg flex items-center gap-2">
+              <svg className="w-5 h-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <span>{validationToast}</span>
+              <button onClick={() => setValidationToast(null)} className="ml-2 text-white/80 hover:text-white">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="absolute bottom-0 right-8 translate-y-1/2 w-3 h-3 bg-red-600 rotate-45"></div>
+          </div>
+        )}
       </div>
     </div>
   )
 }
 
-function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacementChange, onAgeChange, onRemove, onDuplicate, canRemove }: {
-  index: number; item: SubmissionItemData; invoiceNumber: string; onUpdate: (i: number, u: Partial<SubmissionItemData>) => void
+function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAgeChange, onRemove, canRemove }: {
+  index: number; item: SubmissionItemData; onUpdate: (i: number, u: Partial<SubmissionItemData>) => void
   onFileChange: (i: number, f: File | null) => void; onPlacementChange: (i: number, p: PlacementType) => void
-  onAgeChange: (i: number, a: GarmentAge) => void; onRemove: (i: number) => void; onDuplicate: (i: number, asYouth: boolean) => void; canRemove: boolean
-}) {
-  const isVector = !!item.originalPdfFile
-  const validation = item.detected_width_px > 0 && !isVector
+  onAgeChange: (i: number, a: GarmentAge) => void; onRemove: (i: number) => void; canRemove: boolean}) {
+  const validation = item.detected_width_px > 0
     ? validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)
     : null
-  const placementValidation = item.detected_width_px > 0 && isVector
-    ? (() => {
-        const profile = DEFAULT_SIZE_PROFILES.find(sp => sp.placement === item.placement && sp.garment_age === item.garment_age)
-        const warnings: string[] = []
-        if (profile) {
-          if (item.confirmed_width_inches > profile.width_inches * 1.1) {
-            warnings.push(`Width (${item.confirmed_width_inches}") exceeds recommended max for ${profile.label} (${profile.width_inches}").`)
-          }
-          if (item.confirmed_height_inches > profile.height_inches * 1.1) {
-            warnings.push(`Height (${item.confirmed_height_inches}") exceeds recommended max for ${profile.label} (${profile.height_inches}").`)
-          }
-        }
-        return warnings.length > 0 ? { warnings } : null
-      })()
-    : null
-
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
 
-  // Aspect ratio from source file — used to lock proportions
-  const aspectRatio = item.detected_width_px > 0 && item.detected_height_px > 0
-    ? item.detected_width_px / item.detected_height_px
-    : 1
-
-  /** Change width and auto-calculate height to maintain aspect ratio */
-  const handleWidthChange = (newWidth: number) => {
-    if (newWidth <= 0) {
-      onUpdate(index, { confirmed_width_inches: newWidth, size_confirmed: false })
-      return
-    }
-    const newHeight = Math.round((newWidth / aspectRatio) * 100) / 100
-    onUpdate(index, {
-      confirmed_width_inches: newWidth,
-      confirmed_height_inches: newHeight,
-      size_confirmed: false,
-    })
-  }
-
-  /** Change height and auto-calculate width to maintain aspect ratio */
-  const handleHeightChange = (newHeight: number) => {
-    if (newHeight <= 0) {
-      onUpdate(index, { confirmed_height_inches: newHeight, size_confirmed: false })
-      return
-    }
-    const newWidth = Math.round((newHeight * aspectRatio) * 100) / 100
-    onUpdate(index, {
-      confirmed_width_inches: newWidth,
-      confirmed_height_inches: newHeight,
-      size_confirmed: false,
-    })
-  }
-
   const processFile = async (file: File | null) => {
-    if (!file) { setPreviewUrl(null) }
+    if (file) { setPreviewUrl(URL.createObjectURL(file)) } else { setPreviewUrl(null) }
     await onFileChange(index, file)
   }
-
-  useEffect(() => {
-    if (item.file) {
-      const url = URL.createObjectURL(item.file)
-      setPreviewUrl(url)
-      return () => URL.revokeObjectURL(url)
-    } else {
-      setPreviewUrl(null)
-    }
-  }, [item.file])
 
   const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     await processFile(e.target.files?.[0] || null)
@@ -459,7 +394,6 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
       }
     }
   }
-
   const clearFile = () => {
     setPreviewUrl(null)
     onFileChange(index, null)
@@ -469,28 +403,8 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
   return (
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
       <div className="flex items-center justify-between mb-4">
-        <div>
-          <div className="flex items-center gap-2">
-            <h3 className="font-semibold">Print Item #{index + 1}</h3>
-            {isVector && (
-              <span className="text-[10px] px-1.5 py-0.5 bg-green-900/40 border border-green-700/50 text-green-300 rounded font-medium">
-                VECTOR PDF — scales to any size at 300 DPI
-              </span>
-            )}
-          </div>
-          {item.file && item.confirmed_width_inches > 0 && (
-            <p className="text-xs text-orange-400 font-mono mt-1">{getItemLabel(invoiceNumber, item)}</p>
-          )}
-        </div>
-        <div className="flex items-center gap-3">
-          {item.file && (
-            <button onClick={() => onDuplicate(index, item.garment_age === 'adult')}
-              className="text-xs px-2 py-1 bg-blue-900/40 border border-blue-700/50 text-blue-300 rounded hover:bg-blue-800/40 transition-colors">
-              {item.garment_age === 'adult' ? '+ Duplicate as Youth' : '+ Duplicate as Adult'}
-            </button>
-          )}
-          {canRemove && <button onClick={() => onRemove(index)} className="text-sm text-red-400 hover:text-red-300">Remove</button>}
-        </div>
+        <h3 className="font-semibold">Print Item #{index + 1}</h3>
+        {canRemove && <button onClick={() => onRemove(index)} className="text-sm text-red-400 hover:text-red-300">Remove</button>}
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div>
@@ -503,8 +417,7 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
               className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${
                 dragging
                   ? 'border-orange-500 bg-orange-900/20'
-                  : 'border-gray-700 bg-gray-800/50 hover:border-gray-600'
-              }`}
+                  : 'border-gray-700 bg-gray-800/50 hover:border-gray-600'              }`}
             >
               <input
                 type="file"
@@ -528,18 +441,10 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
                 className="absolute top-1 right-1 w-6 h-6 bg-red-600 text-white rounded-full text-xs font-bold hover:bg-red-500 flex items-center justify-center"
                 title="Remove file"
               >
-                X
-              </button>
+                X              </button>
             </div>
           )}
-          {item.detected_width_px > 0 && (
-            <p className="mt-2 text-xs text-gray-500">
-              {isVector
-                ? `Vector source — will render at 300 DPI at any size`
-                : `Source: ${item.detected_width_px} x ${item.detected_height_px}px`
-              }
-            </p>
-          )}
+          {item.detected_width_px > 0 && <p className="mt-2 text-xs text-gray-500">Source: {item.detected_width_px} x {item.detected_height_px}px</p>}
         </div>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
@@ -561,8 +466,7 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
           </div>
           {item.placement === 'custom' && (
             <div>
-              <label className="block text-sm text-gray-400 mb-1">Custom Placement Name *</label>
-              <input type="text" value={item.custom_placement_name} onChange={e => onUpdate(index, { custom_placement_name: e.target.value })}
+              <label className="block text-sm text-gray-400 mb-1">Custom Placement Name *</label>              <input type="text" value={item.custom_placement_name} onChange={e => onUpdate(index, { custom_placement_name: e.target.value })}
                 placeholder="e.g., Right hip, Hat front..."
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm placeholder-gray-500 focus:outline-none focus:border-orange-500" />
             </div>
@@ -574,39 +478,26 @@ function ItemForm({ index, item, invoiceNumber, onUpdate, onFileChange, onPlacem
           </div>
           {item.detected_width_px > 0 && (
             <div className="p-3 bg-gray-800 rounded-lg border border-gray-700">
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-medium">Print Size</p>
-                <span className="text-[10px] text-gray-500">Aspect ratio locked</span>
-              </div>
+              <p className="text-sm font-medium mb-2">Print Size</p>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Width (inches)</label>
                   <input type="number" step="0.25" min="0.5" value={item.confirmed_width_inches}
-                    onChange={e => handleWidthChange(parseFloat(e.target.value) || 0)}
+                    onChange={e => onUpdate(index, { confirmed_width_inches: parseFloat(e.target.value) || 0, size_confirmed: false })}
                     className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-orange-500" />
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Height (inches)</label>
                   <input type="number" step="0.25" min="0.5" value={item.confirmed_height_inches}
-                    onChange={e => handleHeightChange(parseFloat(e.target.value) || 0)}
-                    className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-orange-500" />
-                </div>
+                    onChange={e => onUpdate(index, { confirmed_height_inches: parseFloat(e.target.value) || 0, size_confirmed: false })}
+                    className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-orange-500" />                </div>
               </div>
-              <p className="text-xs text-gray-500 mt-2">Placement max: {(() => {
-                const p = DEFAULT_SIZE_PROFILES.find(sp => sp.placement === item.placement && sp.garment_age === item.garment_age)
-                return p ? `${p.width_inches}" x ${p.height_inches}"` : 'N/A'
-              })()}</p>
-              {isVector && (
-                <p className="text-xs text-green-400 mt-1">Vector source — 300 DPI guaranteed at any size</p>
-              )}
+              <p className="text-xs text-gray-500 mt-2">Suggested: {item.suggested_width_inches}&quot; x {item.suggested_height_inches}&quot;</p>
               {validation && validation.warnings.length > 0 && (
                 <div className="mt-2">{validation.warnings.map((w, i) => (<p key={i} className="text-xs text-yellow-400 mt-1">{w}</p>))}</div>
               )}
               {validation && validation.errors.length > 0 && (
                 <div className="mt-2">{validation.errors.map((e, i) => (<p key={i} className="text-xs text-red-400 mt-1">{e}</p>))}</div>
-              )}
-              {placementValidation && placementValidation.warnings.length > 0 && (
-                <div className="mt-2">{placementValidation.warnings.map((w, i) => (<p key={i} className="text-xs text-yellow-400 mt-1">{w}</p>))}</div>
               )}
               <label className="flex items-center gap-2 mt-3 cursor-pointer">
                 <input type="checkbox" checked={item.size_confirmed} onChange={e => onUpdate(index, { size_confirmed: e.target.checked })} className="w-4 h-4 accent-orange-500" />

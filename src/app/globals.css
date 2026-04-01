@@ -18,3 +18,12 @@
 .print-only {
   display: none;
 }
+
+@keyframes toast-slide-up {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.animate-bounce-once {
+  animation: toast-slide-up 0.3s ease-out;
+}

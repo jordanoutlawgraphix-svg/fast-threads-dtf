@@ -1,7 +1,6 @@
 // ============================================
 // Fast Threads DTF Workflow Manager - Types
 // ============================================
-
 export type PlacementType =
   | 'left_chest'
   | 'full_front'
@@ -22,17 +21,16 @@ export interface SizeProfile {
   id: string
   placement: PlacementType
   garment_age: GarmentAge
-  width_inches: number  height_inches: number
+  width_inches: number
+  height_inches: number
   label: string
   description: string
 }
-
 export interface Location {
   id: string
   name: string
   code: string // e.g., 'MVD', 'WTN', 'DWS'
 }
-
 export interface JobSubmission {
   id: string
   invoice_number: string
@@ -45,9 +43,9 @@ export interface JobSubmission {
   is_rush: boolean
   due_date: string | null
 }
-
 export interface JobItem {
-  id: string  job_id: string
+  id: string
+  job_id: string
   placement: PlacementType
   garment_age: GarmentAge
   quantity: number
@@ -71,14 +69,14 @@ export interface JobItem {
 
 export interface Batch {
   id: string
-  batch_number: number  created_at: string
+  batch_number: number
+  created_at: string
   status: BatchStatus
   total_items: number
   gang_sheet_url: string | null
   summary_pdf_url: string | null
   notes: string | null
 }
-
 export interface BatchItem {
   id: string
   batch_id: string
@@ -95,7 +93,8 @@ export interface BatchItem {
 // Gang sheet layout config
 export interface GangSheetConfig {
   printable_width_inches: number // 28" for your setup
-  dpi: number // 300 default  spacing_inches: number // gap between prints
+  dpi: number // 300 default
+  spacing_inches: number // gap between prints
   batch_label_height_inches: number // space for "START BATCH X" header
 }
 
@@ -107,7 +106,6 @@ export interface SubmissionFormData {
   notes: string
   items: SubmissionItemData[]
 }
-
 export interface SubmissionItemData {
   file: File | null
   placement: PlacementType
@@ -119,7 +117,8 @@ export interface SubmissionItemData {
   detected_height_px: number
   suggested_width_inches: number
   suggested_height_inches: number
-  confirmed_width_inches: number  confirmed_height_inches: number
+  confirmed_width_inches: number
+  confirmed_height_inches: number
   size_confirmed: boolean
 }
 
@@ -152,7 +151,6 @@ export const PLACEMENT_LABELS: Record<PlacementType, string> = {
   names: 'Names',
   custom: 'Custom',
 }
-
 export const LOCATIONS: Location[] = [
   { id: '1', name: 'Fast Threads - Montevideo', code: 'MVD' },
   { id: '2', name: 'Fast Threads - Watertown', code: 'WTN' },

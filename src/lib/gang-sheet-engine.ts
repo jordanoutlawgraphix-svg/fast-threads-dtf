@@ -22,7 +22,8 @@ export interface PlacedItem {
   x: number // inches from left edge
   y: number // inches from top
   width: number
-  height: number  label: string
+  height: number
+  label: string
   invoice_number: string
   copy_index: number // which copy this is (0-based)
 }
@@ -143,7 +144,8 @@ export function layoutGangSheetOptimized(
     if (Math.abs(areaB - areaA) < 0.01) {
       // Tie-break: taller items first
       return b.item.height_inches - a.item.height_inches
-    }    return areaB - areaA
+    }
+    return areaB - areaA
   })
 
   const placed: PlacedItem[] = []
@@ -191,7 +193,8 @@ export function layoutGangSheetOptimized(
       label: entry.item.label,
       invoice_number: entry.item.invoice_number,
       copy_index: entry.copyIndex,
-    })    entry.placed = true
+    })
+    entry.placed = true
   }
 
   // PASS 1: Place items onto shelves
@@ -288,7 +291,8 @@ export function layoutGangSheetOptimized(
 export function createMultipleGangSheets(
   items: PrintItem[],
   startingBatchNumber: number,
-  maxSheetHeightInches: number = 100, // reasonable max length for a single sheet  config: GangSheetConfig = DEFAULT_GANG_SHEET_CONFIG
+  maxSheetHeightInches: number = 100, // reasonable max length for a single sheet
+  config: GangSheetConfig = DEFAULT_GANG_SHEET_CONFIG
 ): GangSheetLayout[] {
   const layouts: GangSheetLayout[] = []
 
@@ -312,7 +316,8 @@ export function createMultipleGangSheets(
     // Check if current batch fits
     const testLayout = layoutGangSheet(currentBatch, currentBatchNumber, config)
     if (testLayout.sheet_height > maxSheetHeightInches) {
-      // Remove last item, finalize this sheet      currentBatch.pop()
+      // Remove last item, finalize this sheet
+      currentBatch.pop()
       if (currentBatch.length > 0) {
         layouts.push(layoutGangSheetOptimized(currentBatch, currentBatchNumber, config))
       }

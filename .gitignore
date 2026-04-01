@@ -4,3 +4,4 @@ node_modules/
 *.bat
 *_output.txt
 *_error.txt
+*.txt 

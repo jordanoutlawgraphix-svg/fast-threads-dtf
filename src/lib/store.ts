@@ -253,5 +253,26 @@ export async function saveSetting<T>(key: string, value: T): Promise<void> {
   if (error) console.error('saveSetting error:', error)
 }
 
+// ---- Feedback ----
+
+export async function submitFeedback(feedback: {
+  type: string
+  message: string
+  submitter_name: string
+  page: string
+  user_agent: string
+}): Promise<void> {
+  const { error } = await supabase.from('feedback').insert(feedback)
+  if (error) console.error('submitFeedback error:', error)
+}
+
+export async function getFeedback(status?: string) {
+  let query = supabase.from('feedback').select('*').order('created_at', { ascending: false })
+  if (status) query = query.eq('status', status)
+  const { data, error } = await query
+  if (error) { console.error('getFeedback error:', error); return [] }
+  return data || []
+}
+
 // Re-export config check
 export { isSupabaseConfigured }

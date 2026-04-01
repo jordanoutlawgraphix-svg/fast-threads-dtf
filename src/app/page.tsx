@@ -62,9 +62,9 @@ export default function Dashboard() {
       <div className="mt-8 bg-gray-900 border border-gray-800 rounded-lg p-4">
         <p className="text-sm text-gray-400">
           <strong className="text-orange-400">How it works:</strong> Staff at any location submit DTF jobs with files, invoice numbers, and placement details.
-          The system validates sizes, auto-resizes for youth garments, and organizes everything into
-          gang sheet batches with tracking numbers. The DTF operator can print summary sheets and
-          match them to cut pieces.
+          The system preserves file dimensions, validates sizes against placement recommendations,
+          and organizes everything into gang sheet batches. The DTF operator downloads gang sheet PNGs
+          for the printer and prints summary sheets to match cut pieces.
         </p>
       </div>
     </div>

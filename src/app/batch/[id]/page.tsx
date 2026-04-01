@@ -1,31 +1,33 @@
 'use client'
 
-import { useState, useEffect, use, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, use } from 'react'
 import * as store from '@/lib/store'
 import { Batch, BatchItem, JobItem, JobSubmission, PLACEMENT_LABELS, DEFAULT_GANG_SHEET_CONFIG } from '@/types'
 import { layoutGangSheetOptimized, PrintItem } from '@/lib/gang-sheet-engine'
 import { downloadGangSheetPNG } from '@/lib/gang-sheet-export'
 import { downloadBatchSummaryPDF } from '@/lib/summary-pdf'
+import { useRouter } from 'next/navigation'
 
 type EnrichedBatchItem = BatchItem & { job_item: JobItem; job: JobSubmission }
 
 export default function BatchDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const router = useRouter()
   const [batch, setBatch] = useState<Batch | null>(null)
   const [batchItems, setBatchItems] = useState<EnrichedBatchItem[]>([])
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
-  const [dissolving, setDissolving] = useState(false)
-  const router = useRouter()
+  const [editingQty, setEditingQty] = useState<string | null>(null)
+  const [editQtyValue, setEditQtyValue] = useState<number>(1)
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [confirmDeleteBatch, setConfirmDeleteBatch] = useState(false)
 
   useEffect(() => {
     loadData()
   }, [id])
 
   const loadData = async () => {
-    setLoading(true)
-    const [b, items] = await Promise.all([store.getBatch(id), store.getBatchItems(id)])
+    setLoading(true)    const [b, items] = await Promise.all([store.getBatch(id), store.getBatchItems(id)])
     setBatch(b)
     setBatchItems(items)
     setLoading(false)
@@ -41,22 +43,6 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     setBatch(prev => prev ? { ...prev, status: 'printed' } : null)
   }
 
-  const handleDissolveBatch = async () => {
-    if (!batch) return
-    if (!confirm(`Un-batch Batch #${batch.batch_number}? All items will return to the unbatched queue.`)) return
-    setDissolving(true)
-    try {
-      const ok = await store.dissolveBatch(id)
-      if (ok) {
-        router.push('/batch')
-      }
-    } catch (err) {
-      console.error('Dissolve failed:', err)
-    } finally {
-      setDissolving(false)
-    }
-  }
-
   const markAsComplete = async () => {
     await store.updateBatchStatus(id, 'complete')
     setBatch(prev => prev ? { ...prev, status: 'complete' } : null)
@@ -64,11 +50,86 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     await Promise.all(Array.from(jobIds).map(jid => store.updateJobStatus(jid, 'complete')))
   }
 
+  // ---- Edit / Delete handlers ----
+
+  const handleEditQuantity = (jobItemId: string, currentQty: number) => {
+    setEditingQty(jobItemId)
+    setEditQtyValue(currentQty)
+  }
+  const handleSaveQuantity = async (jobItemId: string) => {
+    if (editQtyValue < 1) return
+    await store.updateJobItemQuantity(jobItemId, editQtyValue)
+    setEditingQty(null)
+
+    // Recalculate total_items for the batch
+    // total_items = sum of all unique job_item quantities in this batch
+    const updatedItems = batchItems.map(bi =>
+      bi.job_item_id === jobItemId
+        ? { ...bi, job_item: { ...bi.job_item, quantity: editQtyValue } }
+        : bi
+    )
+    setBatchItems(updatedItems)
+
+    const seen = new Set<string>()
+    let total = 0
+    for (const bi of updatedItems) {
+      if (!seen.has(bi.job_item_id)) {
+        seen.add(bi.job_item_id)
+        total += bi.job_item.quantity
+      }
+    }
+    await store.updateBatchTotal(id, total)
+    setBatch(prev => prev ? { ...prev, total_items: total } : null)
+  }
+
+  const handleDeleteItem = async (batchItemId: string, jobItemId: string) => {
+    // Delete all batch_items for this job_item in this batch
+    const toDelete = batchItems.filter(bi => bi.job_item_id === jobItemId)    for (const bi of toDelete) {
+      await store.deleteBatchItem(bi.id)
+    }
+
+    const remaining = batchItems.filter(bi => bi.job_item_id !== jobItemId)
+    setBatchItems(remaining)
+    setConfirmDelete(null)
+
+    if (remaining.length === 0) {
+      // Batch is now empty — delete it entirely
+      await store.deleteBatch(id)
+      router.push('/batch')
+      return
+    }
+
+    // Update total
+    const seen = new Set<string>()
+    let total = 0
+    for (const bi of remaining) {
+      if (!seen.has(bi.job_item_id)) {
+        seen.add(bi.job_item_id)
+        total += bi.job_item.quantity
+      }
+    }
+    await store.updateBatchTotal(id, total)
+    setBatch(prev => prev ? { ...prev, total_items: total } : null)
+
+    // Check if the job that owned this item still has items in any batch
+    // If not, revert that job back to 'queued'
+    const deletedJobId = toDelete[0]?.job?.id    if (deletedJobId) {
+      const otherItemsInBatch = remaining.some(bi => bi.job.id === deletedJobId)
+      if (!otherItemsInBatch) {
+        await store.updateJobStatus(deletedJobId, 'queued')
+      }
+    }
+  }
+
+  const handleDeleteBatch = async () => {
+    await store.deleteBatch(id)
+    router.push('/batch')
+  }
+
   const handleDownloadGangSheet = async () => {
     if (!batch) return
     setExporting(true)
     try {
-      // Rebuild the layout from batch items
       const printItems: PrintItem[] = []
       const imageUrls: Record<string, string> = {}
       const seen = new Set<string>()
@@ -82,7 +143,6 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
         if (filePath) {
           imageUrls[bi.job_item_id] = store.getFileUrl(filePath)
         }
-
         printItems.push({
           id: bi.job_item_id,
           width_inches: Number(bi.job_item.target_width_inches),
@@ -112,12 +172,13 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   }
 
   if (!batch) {
-    return (
-      <div className="text-center py-12 text-gray-500">
+    return (      <div className="text-center py-12 text-gray-500">
         <p>Batch not found.</p>
       </div>
     )
   }
+
+  const canEdit = ['ready', 'building'].includes(batch.status)
 
   // Group items by invoice number for the summary
   const groupedByInvoice: Record<string, EnrichedBatchItem[]> = {}
@@ -140,8 +201,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={handleDownloadGangSheet} disabled={exporting}
-              className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-medium disabled:opacity-50">
-              {exporting ? 'Exporting...' : 'Download Gang Sheet PNG'}
+              className="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 text-sm font-medium disabled:opacity-50">              {exporting ? 'Exporting...' : 'Download Gang Sheet PNG'}
             </button>
             <button onClick={handleDownloadPDF}
               className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-500 text-sm">
@@ -151,12 +211,6 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
               className="px-4 py-2 bg-gray-700 text-white rounded-lg hover:bg-gray-600 text-sm">
               Print Summary
             </button>
-            {batch.status !== 'complete' && (
-              <button onClick={handleDissolveBatch} disabled={dissolving}
-                className="px-4 py-2 bg-red-800 text-red-200 rounded-lg hover:bg-red-700 text-sm border border-red-700 disabled:opacity-50">
-                {dissolving ? 'Un-batching...' : 'Un-batch'}
-              </button>
-            )}
             {batch.status === 'ready' && (
               <button onClick={markAsPrinting} className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 text-sm">
                 Start Printing
@@ -172,8 +226,26 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                 Mark Complete
               </button>
             )}
+            {canEdit && (
+              confirmDeleteBatch ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-red-400">Delete entire batch?</span>                  <button onClick={handleDeleteBatch} className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm font-medium">Yes, Delete</button>
+                  <button onClick={() => setConfirmDeleteBatch(false)} className="px-3 py-2 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 text-sm">Cancel</button>
+                </div>
+              ) : (
+                <button onClick={() => setConfirmDeleteBatch(true)} className="px-4 py-2 bg-red-600/20 text-red-400 border border-red-800/50 rounded-lg hover:bg-red-600/30 text-sm">
+                  Delete Batch
+                </button>
+              )
+            )}
           </div>
         </div>
+
+        {canEdit && (
+          <div className="mb-4 px-3 py-2 bg-blue-900/20 border border-blue-800/40 rounded-lg text-sm text-blue-300">
+            This batch is editable. You can change quantities or remove items below.
+          </div>
+        )}
       </div>
 
       {/* Printable Summary Sheet */}
@@ -186,8 +258,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
               <p className="text-sm text-gray-600">
                 Batch #{batch.batch_number} | {new Date(batch.created_at).toLocaleDateString()} | {batch.total_items} total prints
               </p>
-            </div>
-            <div className="text-right">
+            </div>            <div className="text-right">
               <p className="text-3xl font-black">#{batch.batch_number}</p>
               <p className="text-xs text-gray-500 uppercase">Batch Number</p>
             </div>
@@ -197,7 +268,6 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
         {/* Items grouped by invoice */}
         <div className="space-y-6">
           {Object.entries(groupedByInvoice).map(([invoiceNum, items]) => {
-            // Deduplicate items for this invoice
             const seen = new Map<string, { item: EnrichedBatchItem; count: number }>()
             for (const bi of items) {
               if (!seen.has(bi.job_item_id)) {
@@ -217,18 +287,20 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                 </div>
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-gray-300">
-                      <th className="py-1 text-left w-20">Preview</th>
+                    <tr className="border-b border-gray-300">                      <th className="py-1 text-left w-20">Preview</th>
                       <th className="py-1 text-left">File</th>
                       <th className="py-1 text-left">Placement</th>
                       <th className="py-1 text-left">Size</th>
-                      <th className="py-1 text-center">Adult Qty</th>
-                      <th className="py-1 text-center">Youth Qty</th>
+                      <th className="py-1 text-center">Qty</th>
+                      {canEdit && <th className="py-1 text-center no-print">Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
                     {Array.from(seen.values()).map(({ item, count }) => {
                       const thumbUrl = item.job_item.file_path ? store.getFileUrl(item.job_item.file_path) : null
+                      const isEditing = editingQty === item.job_item_id
+                      const isDeleting = confirmDelete === item.job_item_id
+
                       return (
                         <tr key={item.job_item_id} className="border-b border-gray-200">
                           <td className="py-2">
@@ -244,12 +316,42 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
                           <td className="py-2">
                             {item.job_item.target_width_inches}&quot; x {item.job_item.target_height_inches}&quot;
                           </td>
-                          <td className="py-2 text-center font-bold">
-                            {item.job_item.garment_age === 'adult' ? count : '-'}
+                          <td className="py-2 text-center font-bold">                            {isEditing ? (
+                              <div className="flex items-center justify-center gap-1 no-print">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={editQtyValue}
+                                  onChange={(e) => setEditQtyValue(Math.max(1, parseInt(e.target.value) || 1))}
+                                  className="w-14 px-1 py-0.5 border border-gray-400 rounded text-center text-sm"
+                                />
+                                <button onClick={() => handleSaveQuantity(item.job_item_id)} className="px-1.5 py-0.5 bg-green-600 text-white rounded text-xs">Save</button>
+                                <button onClick={() => setEditingQty(null)} className="px-1.5 py-0.5 bg-gray-400 text-white rounded text-xs">X</button>
+                              </div>
+                            ) : (
+                              <span>{item.job_item.quantity}</span>
+                            )}
                           </td>
-                          <td className="py-2 text-center font-bold">
-                            {item.job_item.garment_age === 'youth' ? count : '-'}
-                          </td>
+                          {canEdit && (
+                            <td className="py-2 text-center no-print">
+                              {isDeleting ? (
+                                <div className="flex items-center justify-center gap-1">
+                                  <button onClick={() => handleDeleteItem(item.id, item.job_item_id)} className="px-2 py-0.5 bg-red-600 text-white rounded text-xs">Remove</button>
+                                  <button onClick={() => setConfirmDelete(null)} className="px-2 py-0.5 bg-gray-400 text-white rounded text-xs">Cancel</button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-center gap-1">
+                                  <button onClick={() => handleEditQuantity(item.job_item_id, item.job_item.quantity)}
+                                    className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded text-xs hover:bg-blue-200" title="Edit quantity">
+                                    Edit Qty
+                                  </button>
+                                  <button onClick={() => setConfirmDelete(item.job_item_id)}                                    className="px-2 py-0.5 bg-red-100 text-red-700 rounded text-xs hover:bg-red-200" title="Remove from batch">
+                                    Delete
+                                  </button>
+                                </div>
+                              )}
+                            </td>
+                          )}
                         </tr>
                       )
                     })}

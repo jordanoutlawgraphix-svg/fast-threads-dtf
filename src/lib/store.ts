@@ -26,8 +26,7 @@ export async function getJob(id: string): Promise<JobSubmission | null> {
 }
 
 export async function createJob(job: Omit<JobSubmission, 'created_at'>): Promise<JobSubmission | null> {
-  const { data, error } = await supabase.from('jobs').insert(job).select().single()
-  if (error) { console.error('createJob error:', error); return null }
+  const { data, error } = await supabase.from('jobs').insert(job).select().single()  if (error) { console.error('createJob error:', error); return null }
   return data
 }
 
@@ -54,7 +53,6 @@ export async function getUnbatchedItems(): Promise<(JobItem & { job: JobSubmissi
   // Get all job items that are NOT in any batch
   const { data: batchedIds } = await supabase.from('batch_items').select('job_item_id')
   const batchedSet = new Set((batchedIds || []).map(b => b.job_item_id))
-
   const { data: items, error } = await supabase
     .from('job_items')
     .select('*, jobs(*)')
@@ -85,7 +83,6 @@ export async function getBatches(status?: BatchStatus): Promise<Batch[]> {
   if (error) { console.error('getBatches error:', error); return [] }
   return data || []
 }
-
 export async function getBatch(id: string): Promise<Batch | null> {
   const { data, error } = await supabase.from('batches').select('*').eq('id', id).single()
   if (error) { console.error('getBatch error:', error); return null }
@@ -113,7 +110,6 @@ export async function getBatchItems(batchId: string): Promise<(BatchItem & { job
 
   if (error) { console.error('getBatchItems error:', error); return [] }
   if (!data) return []
-
   return data.map(item => {
     const jobItem = item.job_items as unknown as (JobItem & { jobs: JobSubmission })
     const job = jobItem.jobs as unknown as JobSubmission
@@ -144,36 +140,42 @@ export async function createBatchItems(items: Omit<BatchItem, 'created_at'>[]): 
   if (error) { console.error('createBatchItems error:', error); return false }
   return true
 }
+export async function deleteBatchItem(batchItemId: string): Promise<boolean> {
+  const { error } = await supabase.from('batch_items').delete().eq('id', batchItemId)
+  if (error) { console.error('deleteBatchItem error:', error); return false }
+  return true
+}
 
-export async function dissolveBatch(batchId: string): Promise<boolean> {
-  // Get batch items so we can reset job statuses
-  const { data: batchItems } = await supabase
-    .from('batch_items')
-    .select('job_item_id, job_items(job_id)')
-    .eq('batch_id', batchId)
+export async function updateBatchTotal(batchId: string, totalItems: number): Promise<void> {
+  const { error } = await supabase.from('batches').update({ total_items: totalItems, updated_at: new Date().toISOString() }).eq('id', batchId)
+  if (error) console.error('updateBatchTotal error:', error)
+}
 
-  // Delete batch items first (FK constraint)
+export async function deleteBatch(batchId: string): Promise<boolean> {
+  // First get the batch items to know which jobs to revert
+  const { data: items } = await supabase.from('batch_items').select('job_item_id, job_items(job_id)').eq('batch_id', batchId)
+
+  // Delete all batch items first
   const { error: itemsErr } = await supabase.from('batch_items').delete().eq('batch_id', batchId)
-  if (itemsErr) { console.error('dissolveBatch items error:', itemsErr); return false }
+  if (itemsErr) { console.error('deleteBatch items error:', itemsErr); return false }
 
   // Delete the batch
   const { error: batchErr } = await supabase.from('batches').delete().eq('id', batchId)
-  if (batchErr) { console.error('dissolveBatch batch error:', batchErr); return false }
+  if (batchErr) { console.error('deleteBatch error:', batchErr); return false }
 
-  // Reset job statuses back to 'submitted' so items return to unbatched queue
-  if (batchItems) {
-    const jobIds = new Set<string>()
-    for (const bi of batchItems) {
-      const jobItem = bi.job_items as unknown as { job_id: string }
-      if (jobItem?.job_id) jobIds.add(jobItem.job_id)
-    }
-    await Promise.all(
-      Array.from(jobIds).map(jid =>
-        supabase.from('jobs').update({ status: 'submitted', updated_at: new Date().toISOString() }).eq('id', jid)
-      )
-    )
+  // Revert job statuses back to 'queued' so items appear in unbatched pool
+  if (items && items.length > 0) {
+    const jobIds = new Set(items.map(i => (i.job_items as unknown as { job_id: string })?.job_id).filter(Boolean))
+    await Promise.all(Array.from(jobIds).map(jid =>
+      supabase.from('jobs').update({ status: 'queued', updated_at: new Date().toISOString() }).eq('id', jid)
+    ))
   }
+  return true
+}
 
+export async function updateJobItemQuantity(jobItemId: string, quantity: number): Promise<boolean> {
+  const { error } = await supabase.from('job_items').update({ quantity }).eq('id', jobItemId)
+  if (error) { console.error('updateJobItemQuantity error:', error); return false }
   return true
 }
 
@@ -195,7 +197,6 @@ export function getFileUrl(path: string): string {
 }
 
 // ---- Stats ----
-
 export async function getStats() {
   const [
     { count: totalJobs },
@@ -225,7 +226,6 @@ export async function getStats() {
       .in('batch_id', ids)
     totalItemsPrinted = count || 0
   }
-
   return {
     totalJobs: totalJobs || 0,
     pendingJobs: pendingJobs || 0,
@@ -251,27 +251,6 @@ export async function saveSetting<T>(key: string, value: T): Promise<void> {
     updated_at: new Date().toISOString(),
   }, { onConflict: 'key' })
   if (error) console.error('saveSetting error:', error)
-}
-
-// ---- Feedback ----
-
-export async function submitFeedback(feedback: {
-  type: string
-  message: string
-  submitter_name: string
-  page: string
-  user_agent: string
-}): Promise<void> {
-  const { error } = await supabase.from('feedback').insert(feedback)
-  if (error) console.error('submitFeedback error:', error)
-}
-
-export async function getFeedback(status?: string) {
-  let query = supabase.from('feedback').select('*').order('created_at', { ascending: false })
-  if (status) query = query.eq('status', status)
-  const { data, error } = await query
-  if (error) { console.error('getFeedback error:', error); return [] }
-  return data || []
 }
 
 // Re-export config check

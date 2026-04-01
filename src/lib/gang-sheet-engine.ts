@@ -72,7 +72,8 @@ export function layoutGangSheet(
     const itemHeight = item.height_inches
 
     // Can this item fit on the current shelf?
-    if (currentX + itemWidth + spacing_inches > printable_width_inches) {      // Move to next shelf
+    if (currentX + itemWidth + spacing_inches > printable_width_inches) {
+      // Move to next shelf
       currentY += currentShelfHeight + spacing_inches
       currentX = spacing_inches
       currentShelfHeight = 0
@@ -113,14 +114,17 @@ export function layoutGangSheet(
 }
 
 /**
- * Improved layout using shelf packing with gap-filling and per-item rotation.
+ * Improved layout using shelf packing with multi-shelf best-fit,
+ * smart rotation, and aggressive gap-filling.
  *
  * Algorithm:
- * 1. Sort items by height descending (best-fit decreasing)
- * 2. Place items on shelves left-to-right
- * 3. When a shelf has gaps (short items next to tall ones), attempt to fill
- *    the gap above shorter items with remaining unplaced items
- * 4. Try each item in both orientations (normal + 90° rotated) and pick *    whichever fits the available space with less waste
+ * 1. Sort items by area descending (largest first)
+ * 2. For each item, try ALL existing shelves (not just the last one)
+ *    - Score each placement: prefer fitting within existing shelf height,
+ *      then minimize wasted width, then minimize shelf height increase
+ * 3. If no shelf fits, create a new shelf
+ * 4. Try each item in both orientations (normal + 90 rotated)
+ * 5. Gap-fill: stack smaller items in dead space above short items
  */
 export function layoutGangSheetOptimized(
   items: PrintItem[],
@@ -142,7 +146,6 @@ export function layoutGangSheetOptimized(
     const areaA = a.item.width_inches * a.item.height_inches
     const areaB = b.item.width_inches * b.item.height_inches
     if (Math.abs(areaB - areaA) < 0.01) {
-      // Tie-break: taller items first
       return b.item.height_inches - a.item.height_inches
     }
     return areaB - areaA
@@ -153,23 +156,23 @@ export function layoutGangSheetOptimized(
 
   // Shelf tracking
   interface Shelf {
-    y: number           // top of shelf
-    height: number      // shelf height (tallest item)
-    nextX: number       // next available X position
-    segments: { x: number; width: number; itemHeight: number }[] // track per-item heights for gap filling
+    y: number
+    height: number
+    nextX: number
+    segments: { x: number; width: number; itemHeight: number }[]
   }
 
   const shelves: Shelf[] = []
   const startY = batch_label_height_inches + spacing_inches
 
-  // Helper: try to place an item, considering rotation
+  // Helper: try both orientations, return best fit for given constraints
   function bestFit(
     itemW: number, itemH: number, availW: number, availH: number
   ): { width: number; height: number; rotated: boolean } | null {
     const fitsNormal = itemW <= availW + 0.001 && (availH === 0 || itemH <= availH + 0.001)
     const fitsRotated = itemH <= availW + 0.001 && (availH === 0 || itemW <= availH + 0.001)
 
-    if (fitsNormal && fitsRotated) {      // Pick orientation that wastes less width
+    if (fitsNormal && fitsRotated) {
       const wasteNormal = availW - itemW
       const wasteRotated = availW - itemH
       if (wasteNormal <= wasteRotated) {
@@ -183,11 +186,27 @@ export function layoutGangSheetOptimized(
     return null
   }
 
+  // Score a potential shelf placement (lower = better)
+  function scorePlacement(
+    fit: { width: number; height: number },
+    shelf: Shelf
+  ): number {
+    const widthWaste = (printable_width_inches - shelf.nextX - spacing_inches) - fit.width
+    const heightIncrease = Math.max(0, fit.height - shelf.height)
+    // Heavily penalize height increase (adds sheet length)
+    // Prefer tight width fit on existing shelves
+    if (heightIncrease === 0) {
+      return widthWaste
+    }
+    return widthWaste + heightIncrease * 100
+  }
+
   function placeOnSheet(entry: typeof expandedItems[0], x: number, y: number, w: number, h: number) {
     placed.push({
       id: `placed-${placedIdCounter++}`,
       item_id: entry.item.id,
-      x, y,
+      x,
+      y,
       width: w,
       height: h,
       label: entry.item.label,
@@ -197,36 +216,47 @@ export function layoutGangSheetOptimized(
     entry.placed = true
   }
 
-  // PASS 1: Place items onto shelves
+  // PASS 1: Place items onto shelves (try ALL shelves, pick best)
   for (const entry of expandedItems) {
     if (entry.placed) continue
 
     const itemW = entry.item.width_inches
     const itemH = entry.item.height_inches
 
-    let placedOnExistingShelf = false
+    let bestShelfIndex = -1
+    let bestFitResult: { width: number; height: number; rotated: boolean } | null = null
+    let bestScore = Infinity
 
-    // Try to fit on the last shelf first (most common case)
-    if (shelves.length > 0) {
-      const shelf = shelves[shelves.length - 1]
+    // Try every existing shelf
+    for (let si = 0; si < shelves.length; si++) {
+      const shelf = shelves[si]
       const availW = printable_width_inches - shelf.nextX - spacing_inches
-      const fit = bestFit(itemW, itemH, availW, 0) // no height constraint for shelf items
+      if (availW < 0.5) continue // shelf is full
 
+      const fit = bestFit(itemW, itemH, availW, 0)
       if (fit) {
-        placeOnSheet(entry, shelf.nextX, shelf.y, fit.width, fit.height)
-        shelf.segments.push({ x: shelf.nextX, width: fit.width, itemHeight: fit.height })
-        shelf.nextX += fit.width + spacing_inches
-        shelf.height = Math.max(shelf.height, fit.height)
-        placedOnExistingShelf = true
+        const score = scorePlacement(fit, shelf)
+        if (score < bestScore) {
+          bestScore = score
+          bestShelfIndex = si
+          bestFitResult = fit
+        }
       }
     }
-    if (!placedOnExistingShelf) {
-      // Start a new shelf
+
+    if (bestShelfIndex >= 0 && bestFitResult) {
+      // Place on the best-scoring shelf
+      const shelf = shelves[bestShelfIndex]
+      placeOnSheet(entry, shelf.nextX, shelf.y, bestFitResult.width, bestFitResult.height)
+      shelf.segments.push({ x: shelf.nextX, width: bestFitResult.width, itemHeight: bestFitResult.height })
+      shelf.nextX += bestFitResult.width + spacing_inches
+      shelf.height = Math.max(shelf.height, bestFitResult.height)
+    } else {
+      // No existing shelf works - create a new one
       const shelfY = shelves.length === 0
         ? startY
         : shelves[shelves.length - 1].y + shelves[shelves.length - 1].height + spacing_inches
 
-      // Try rotation for the first item on the new shelf
       const fit = bestFit(itemW, itemH, printable_width_inches - 2 * spacing_inches, 0)
       if (fit) {
         const newShelf: Shelf = {
@@ -241,24 +271,32 @@ export function layoutGangSheetOptimized(
     }
   }
 
-  // PASS 2: Gap-fill — find unused space above short items on each shelf
+  // PASS 2: Aggressive gap-fill - stack items in dead space above short items
   for (const shelf of shelves) {
-    for (const seg of shelf.segments) {      const gapHeight = shelf.height - seg.itemHeight - spacing_inches
-      if (gapHeight < 0.5) continue // gap too small to be useful
-
-      const gapY = shelf.y + seg.itemHeight + spacing_inches
+    for (const seg of shelf.segments) {
+      let gapY = shelf.y + seg.itemHeight + spacing_inches
+      let gapHeight = shelf.height - seg.itemHeight - spacing_inches
       const gapWidth = seg.width
 
-      // Try to fit unplaced items into this gap
-      for (const entry of expandedItems) {
-        if (entry.placed) continue
-        const fit = bestFit(
-          entry.item.width_inches, entry.item.height_inches,
-          gapWidth, gapHeight
-        )
-        if (fit) {
-          placeOnSheet(entry, seg.x, gapY, fit.width, fit.height)
-          break // one item per gap segment to keep it simple
+      if (gapHeight < 0.5) continue
+
+      // Try to fill multiple items into each gap (stack vertically)
+      let filled = true
+      while (filled && gapHeight >= 0.5) {
+        filled = false
+        for (const entry of expandedItems) {
+          if (entry.placed) continue
+          const fit = bestFit(
+            entry.item.width_inches, entry.item.height_inches,
+            gapWidth, gapHeight
+          )
+          if (fit) {
+            placeOnSheet(entry, seg.x, gapY, fit.width, fit.height)
+            gapY += fit.height + spacing_inches
+            gapHeight -= fit.height + spacing_inches
+            filled = true
+            break
+          }
         }
       }
     }
@@ -267,7 +305,8 @@ export function layoutGangSheetOptimized(
   // Calculate total sheet height
   const lastShelf = shelves[shelves.length - 1]
   const sheetHeight = lastShelf
-    ? lastShelf.y + lastShelf.height + spacing_inches + batch_label_height_inches    : startY + batch_label_height_inches
+    ? lastShelf.y + lastShelf.height + spacing_inches + batch_label_height_inches
+    : startY + batch_label_height_inches
 
   // Calculate utilization
   const totalPrintArea = placed.reduce((sum, p) => sum + p.width * p.height, 0)
@@ -291,7 +330,7 @@ export function layoutGangSheetOptimized(
 export function createMultipleGangSheets(
   items: PrintItem[],
   startingBatchNumber: number,
-  maxSheetHeightInches: number = 100, // reasonable max length for a single sheet
+  maxSheetHeightInches: number = 100,
   config: GangSheetConfig = DEFAULT_GANG_SHEET_CONFIG
 ): GangSheetLayout[] {
   const layouts: GangSheetLayout[] = []

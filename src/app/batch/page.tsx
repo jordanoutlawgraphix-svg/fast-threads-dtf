@@ -70,8 +70,8 @@ const batch = await store.createBatch({
         id: batchId,
         status: 'ready',
         total_items: previewLayout.total_items,
-        gang_sheet_url: null,
-        summary_pdf_url: null,
+        gang_sheet_path: null,
+        summary_pdf_path: null,
         notes: null,
       })
       if (!batch) throw new Error('Failed to create batch')

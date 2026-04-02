@@ -73,8 +73,8 @@ export interface Batch {
   created_at: string
   status: BatchStatus
   total_items: number
-  gang_sheet_url: string | null
-  summary_pdf_url: string | null
+  gang_sheet_path: string | null
+  summary_pdf_path: string | null
   notes: string | null
 }
 export interface BatchItem {

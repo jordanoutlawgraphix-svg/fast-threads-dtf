@@ -48,13 +48,17 @@ interface SkylineNode {
 }
 
 // Find the best position on the skyline to place an item of given width.
-// Returns the position with the lowest Y (ties broken by leftmost X).
+// Returns the position with the lowest Y. Ties broken by:
+//   1. Lowest wasted space (difference between span width and item width)
+//   2. Leftmost X position
+// This prevents items from floating in awkward gaps when a tighter fit exists.
 function findSkylinePosition(
   skyline: SkylineNode[],
   itemWidth: number,
   sheetWidth: number
 ): { x: number; y: number; startIdx: number; endIdx: number } | null {
   let bestY = Infinity
+  let bestWaste = Infinity
   let bestX = Infinity
   let bestStart = -1
   let bestEnd = -1
@@ -74,8 +78,16 @@ function findSkylinePosition(
     }
 
     if (spanWidth >= itemWidth - 0.001) {
-      if (maxY < bestY || (Math.abs(maxY - bestY) < 0.001 && startX < bestX)) {
+      // Waste = how much wider the span is than the item (prefer tight fits)
+      const waste = spanWidth - itemWidth
+      const isBetter =
+        maxY < bestY - 0.001 ||
+        (Math.abs(maxY - bestY) < 0.001 && waste < bestWaste - 0.001) ||
+        (Math.abs(maxY - bestY) < 0.001 && Math.abs(waste - bestWaste) < 0.001 && startX < bestX)
+
+      if (isBetter) {
         bestY = maxY
+        bestWaste = waste
         bestX = startX
         bestStart = i
         bestEnd = j

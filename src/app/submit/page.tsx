@@ -68,6 +68,16 @@ const updateItem = useCallback((index: number, updates: Partial<SubmissionItemDa
     })
   }, [])
 const addItem = () => setItems(prev => [...prev, { ...EMPTY_ITEM }])
+const duplicateItem = (index: number) => {
+    setItems(prev => {
+      const source = prev[index]
+      const copy = { ...source }
+      // Insert the copy right after the source item
+      const newItems = [...prev]
+      newItems.splice(index + 1, 0, copy)
+      return newItems
+    })
+  }
 const removeItem = (index: number) => {
     if (items.length <= 1) return
     setItems(prev => prev.filter((_, i) => i !== index))
@@ -364,7 +374,7 @@ if (submitted) {
       <div className="space-y-6 mb-6">
       {items.map((item, index) => (
           <ItemForm key={index} index={index} item={item} onUpdate={updateItem} onFileChange={handleFileChange}
-            onPlacementChange={handlePlacementChange} onAgeChange={handleAgeChange} onRemove={removeItem} canRemove={items.length > 1} />
+            onPlacementChange={handlePlacementChange} onAgeChange={handleAgeChange} onRemove={removeItem} onDuplicate={duplicateItem} canRemove={items.length > 1} />
         ))}
       </div>
       <div className="flex gap-4 mb-8">
@@ -406,10 +416,10 @@ if (submitted) {
   )
 }
 
-function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAgeChange, onRemove, canRemove }: {
+function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAgeChange, onRemove, onDuplicate, canRemove }: {
   index: number; item: SubmissionItemData; onUpdate: (i: number, u: Partial<SubmissionItemData>) => void
   onFileChange: (i: number, f: File | null) => void; onPlacementChange: (i: number, p: PlacementType) => void
-  onAgeChange: (i: number, a: GarmentAge) => void; onRemove: (i: number) => void; canRemove: boolean
+  onAgeChange: (i: number, a: GarmentAge) => void; onRemove: (i: number) => void; onDuplicate: (i: number) => void; canRemove: boolean
 }) {
   const validation = item.detected_width_px > 0
     ? validateItemSizing(item.detected_width_px, item.detected_height_px, item.confirmed_width_inches, item.confirmed_height_inches, item.placement, item.garment_age)
@@ -454,7 +464,11 @@ const clearFile = () => {
     <div className="bg-gray-900 border border-gray-800 rounded-lg p-6">
     <div className="flex items-center justify-between mb-4">
     <h3 className="font-semibold">Print Item #{index + 1}</h3>
-    {canRemove && <button onClick={() => onRemove(index)} className="text-sm text-red-400 hover:text-red-300">Remove</button>}      </div>
+    <div className="flex items-center gap-3">
+    <button onClick={() => onDuplicate(index)} className="text-sm text-blue-400 hover:text-blue-300">Duplicate</button>
+    {canRemove && <button onClick={() => onRemove(index)} className="text-sm text-red-400 hover:text-red-300">Remove</button>}
+    </div>
+    </div>
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
     <div>
     <label className="block text-sm text-gray-400 mb-1">File *</label>
@@ -534,13 +548,23 @@ const clearFile = () => {
             <div>
             <label className="block text-xs text-gray-500 mb-1">Width (inches)</label>
             <input type="number" step="0.25" min="0.5" value={item.confirmed_width_inches}
-                    onChange={e => onUpdate(index, { confirmed_width_inches: parseFloat(e.target.value) || 0, size_confirmed: false })}
+                    onChange={e => {
+                      const newW = parseFloat(e.target.value) || 0
+                      const aspectRatio = item.detected_width_px > 0 ? item.detected_height_px / item.detected_width_px : 1
+                      const newH = Math.round(newW * aspectRatio * 100) / 100
+                      onUpdate(index, { confirmed_width_inches: newW, confirmed_height_inches: newH, size_confirmed: false })
+                    }}
                     className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-orange-500" />
                     </div>
                     <div>
                     <label className="block text-xs text-gray-500 mb-1">Height (inches)</label>
                     <input type="number" step="0.25" min="0.5" value={item.confirmed_height_inches}
-                    onChange={e => onUpdate(index, { confirmed_height_inches: parseFloat(e.target.value) || 0, size_confirmed: false })}
+                    onChange={e => {
+                      const newH = parseFloat(e.target.value) || 0
+                      const aspectRatio = item.detected_height_px > 0 ? item.detected_width_px / item.detected_height_px : 1
+                      const newW = Math.round(newH * aspectRatio * 100) / 100
+                      onUpdate(index, { confirmed_width_inches: newW, confirmed_height_inches: newH, size_confirmed: false })
+                    }}
                     className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-orange-500" />
                     </div>
                     </div>

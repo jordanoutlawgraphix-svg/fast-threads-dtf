@@ -3,6 +3,8 @@
 // ============================================
 // Skyline bin-packing algorithm for arranging prints on a 28"-wide gang sheet.
 // Places items at the lowest available position, naturally filling gaps.
+// IMPORTANT: Artwork is NEVER rotated. DTF prints must stay in their
+// original orientation so they print correctly on garments.
 
 import { GangSheetConfig, DEFAULT_GANG_SHEET_CONFIG } from '@/types'
 
@@ -38,20 +40,14 @@ export interface GangSheetLayout {
 }
 
 // ---- Skyline data structure ----
-// The skyline is a list of horizontal segments representing the top edge
-// of already-placed content. Each node: { x, y, width }
-// Items are placed at the lowest available position on the skyline.
 interface SkylineNode {
-  x: number  // left edge of segment
-  y: number  // height (top edge) of segment
-  width: number  // width of segment
+  x: number
+  y: number
+  width: number
 }
 
 // Find the best position on the skyline to place an item of given width.
-// Returns the position with the lowest Y. Ties broken by:
-//   1. Lowest wasted space (difference between span width and item width)
-//   2. Leftmost X position
-// This prevents items from floating in awkward gaps when a tighter fit exists.
+// Picks lowest Y, then tightest fit, then leftmost X.
 function findSkylinePosition(
   skyline: SkylineNode[],
   itemWidth: number,
@@ -67,7 +63,6 @@ function findSkylinePosition(
     const startX = skyline[i].x
     if (startX + itemWidth > sheetWidth + 0.001) break
 
-    // Find the max Y across all segments this item would span
     let maxY = 0
     let spanWidth = 0
     let j = i
@@ -78,13 +73,11 @@ function findSkylinePosition(
     }
 
     if (spanWidth >= itemWidth - 0.001) {
-      // Waste = how much wider the span is than the item (prefer tight fits)
       const waste = spanWidth - itemWidth
       const isBetter =
         maxY < bestY - 0.001 ||
         (Math.abs(maxY - bestY) < 0.001 && waste < bestWaste - 0.001) ||
         (Math.abs(maxY - bestY) < 0.001 && Math.abs(waste - bestWaste) < 0.001 && startX < bestX)
-
       if (isBetter) {
         bestY = maxY
         bestWaste = waste
@@ -111,21 +104,17 @@ function updateSkyline(
   const itemRight = itemLeft + itemWidth
   const result: SkylineNode[] = []
 
-  // Keep segments entirely before the item
   for (let i = 0; i < pos.startIdx; i++) {
     result.push({ ...skyline[i] })
   }
 
-  // Handle left remainder of first covered segment
   const firstSeg = skyline[pos.startIdx]
   if (firstSeg.x < itemLeft - 0.001) {
     result.push({ x: firstSeg.x, y: firstSeg.y, width: itemLeft - firstSeg.x })
   }
 
-  // New raised segment for the placed item
   result.push({ x: itemLeft, y: newY, width: itemWidth })
 
-  // Handle right remainder of last covered segment
   const lastIdx = pos.endIdx - 1
   const lastSeg = skyline[lastIdx]
   const lastSegEnd = lastSeg.x + lastSeg.width
@@ -133,12 +122,11 @@ function updateSkyline(
     result.push({ x: itemRight, y: lastSeg.y, width: lastSegEnd - itemRight })
   }
 
-  // Keep segments entirely after the item
   for (let i = pos.endIdx; i < skyline.length; i++) {
     result.push({ ...skyline[i] })
   }
 
-  // Merge adjacent segments with the same Y
+  // Merge adjacent segments with same Y
   const merged: SkylineNode[] = [result[0]]
   for (let k = 1; k < result.length; k++) {
     const prev = merged[merged.length - 1]
@@ -153,7 +141,7 @@ function updateSkyline(
 }
 
 /**
- * Simple shelf-based layout (kept as fallback).
+ * Simple shelf-based layout (kept as fallback for height estimation).
  */
 export function layoutGangSheet(
   items: PrintItem[],
@@ -167,7 +155,6 @@ export function layoutGangSheet(
       expandedItems.push({ item, copyIndex: i })
     }
   }
-
   expandedItems.sort((a, b) => b.item.height_inches - a.item.height_inches)
 
   const placed: PlacedItem[] = []
@@ -179,13 +166,11 @@ export function layoutGangSheet(
   for (const { item, copyIndex } of expandedItems) {
     const itemWidth = item.width_inches
     const itemHeight = item.height_inches
-
     if (currentX + itemWidth + spacing_inches > printable_width_inches) {
       currentY += currentShelfHeight + spacing_inches
       currentX = spacing_inches
       currentShelfHeight = 0
     }
-
     placed.push({
       id: `placed-${placedIdCounter++}`,
       item_id: item.id,
@@ -197,7 +182,6 @@ export function layoutGangSheet(
       invoice_number: item.invoice_number,
       copy_index: copyIndex,
     })
-
     currentX += itemWidth + spacing_inches
     currentShelfHeight = Math.max(currentShelfHeight, itemHeight)
   }
@@ -220,12 +204,12 @@ export function layoutGangSheet(
 /**
  * Skyline bin-packing layout for gang sheets.
  *
- * Instead of rows/shelves, this tracks the actual top edge (skyline) of
- * all placed content and drops each new item into the lowest available
- * position. Items naturally fill gaps — like Tetris.
+ * Tracks the top edge (skyline) of placed content and drops each new
+ * item into the lowest available position, naturally filling gaps.
+ * Artwork is NEVER rotated - DTF prints must keep original orientation.
  *
- * Each item is tried in both orientations (normal + 90 rotated) and the
- * orientation producing the lower placement wins.
+ * Sort order: largest area first so big items get placed while the
+ * skyline is still flat, then small items fill the remaining gaps.
  */
 export function layoutGangSheetOptimized(
   items: PrintItem[],
@@ -243,18 +227,20 @@ export function layoutGangSheetOptimized(
     }
   }
 
-  // Sort by height descending — taller items first creates flatter skylines
+  // Sort: largest area first, then tallest, then widest
   expandedItems.sort((a, b) => {
+    const areaA = a.item.width_inches * a.item.height_inches
+    const areaB = b.item.width_inches * b.item.height_inches
+    if (Math.abs(areaB - areaA) > 0.1) return areaB - areaA
     const hDiff = b.item.height_inches - a.item.height_inches
     if (Math.abs(hDiff) > 0.01) return hDiff
-    return (b.item.width_inches * b.item.height_inches) - (a.item.width_inches * a.item.height_inches)
+    return b.item.width_inches - a.item.width_inches
   })
 
   const placed: PlacedItem[] = []
   let placedIdCounter = 0
 
   // Initialize skyline: one flat segment spanning usable width
-  // The Y starts after the batch label area
   const startY = batch_label_height_inches + spacing_inches
   let skyline: SkylineNode[] = [{ x: spacing_inches, y: startY, width: usableWidth }]
 
@@ -262,36 +248,8 @@ export function layoutGangSheetOptimized(
     const w = item.width_inches
     const h = item.height_inches
 
-    // Try normal orientation
-    const posNormal = findSkylinePosition(skyline, w + spacing_inches, printable_width_inches)
-    // Try rotated orientation
-    const posRotated = findSkylinePosition(skyline, h + spacing_inches, printable_width_inches)
-
-    let useRotated = false
-    let pos: { x: number; y: number; startIdx: number; endIdx: number } | null = null
-    let finalW = w
-    let finalH = h
-
-    if (posNormal && posRotated) {
-      // Pick whichever results in the lower top edge after placement
-      const topNormal = posNormal.y + h
-      const topRotated = posRotated.y + w
-      if (topRotated < topNormal - 0.001) {
-        useRotated = true
-        pos = posRotated
-        finalW = h
-        finalH = w
-      } else {
-        pos = posNormal
-      }
-    } else if (posNormal) {
-      pos = posNormal
-    } else if (posRotated) {
-      useRotated = true
-      pos = posRotated
-      finalW = h
-      finalH = w
-    }
+    // Find best position - NO rotation
+    const pos = findSkylinePosition(skyline, w + spacing_inches, printable_width_inches)
 
     if (pos) {
       placed.push({
@@ -299,23 +257,21 @@ export function layoutGangSheetOptimized(
         item_id: item.id,
         x: pos.x,
         y: pos.y,
-        width: finalW,
-        height: finalH,
+        width: w,
+        height: h,
         label: item.label,
         invoice_number: item.invoice_number,
         copy_index: copyIndex,
       })
 
-      // Update skyline with the placed item (include spacing in height)
-      skyline = updateSkyline(skyline, pos, finalW + spacing_inches, finalH + spacing_inches)
+      skyline = updateSkyline(skyline, pos, w + spacing_inches, h + spacing_inches)
     }
   }
 
-  // Calculate total sheet height from skyline max Y
+  // Sheet height = tallest point on skyline + bottom label
   const maxY = skyline.reduce((max, seg) => Math.max(max, seg.y), startY)
   const sheetHeight = maxY + batch_label_height_inches
 
-  // Calculate utilization
   const totalPrintArea = placed.reduce((sum, p) => sum + p.width * p.height, 0)
   const sheetArea = printable_width_inches * sheetHeight
   const utilization = sheetArea > 0 ? (totalPrintArea / sheetArea) * 100 : 0
@@ -347,7 +303,6 @@ export function createMultipleGangSheets(
       expandedItems.push({ ...item, quantity: 1, id: `${item.id}-copy-${i}` })
     }
   }
-
   expandedItems.sort((a, b) => b.height_inches - a.height_inches)
 
   let currentBatch: PrintItem[] = []
@@ -355,7 +310,6 @@ export function createMultipleGangSheets(
 
   for (const item of expandedItems) {
     currentBatch.push(item)
-
     const testLayout = layoutGangSheet(currentBatch, currentBatchNumber, config)
     if (testLayout.sheet_height > maxSheetHeightInches) {
       currentBatch.pop()

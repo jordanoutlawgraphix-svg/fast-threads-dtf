@@ -47,11 +47,12 @@ interface SkylineNode {
 }
 
 // Find the best position on the skyline to place an item of given width.
-// Picks lowest Y, then tightest fit, then leftmost X.
+// Strategy: find the lowest Y where the item fits, breaking ties by
+// least wasted space, then leftmost X.
 function findSkylinePosition(
   skyline: SkylineNode[],
   itemWidth: number,
-  sheetWidth: number
+  maxRight: number
 ): { x: number; y: number; startIdx: number; endIdx: number } | null {
   let bestY = Infinity
   let bestWaste = Infinity
@@ -61,8 +62,10 @@ function findSkylinePosition(
 
   for (let i = 0; i < skyline.length; i++) {
     const startX = skyline[i].x
-    if (startX + itemWidth > sheetWidth + 0.001) break
+    // If this segment starts too far right, no room for item
+    if (startX + itemWidth > maxRight + 0.001) break
 
+    // Span across segments to cover itemWidth
     let maxY = 0
     let spanWidth = 0
     let j = i
@@ -92,7 +95,7 @@ function findSkylinePosition(
   return { x: bestX, y: bestY, startIdx: bestStart, endIdx: bestEnd }
 }
 
-// After placing an item, update the skyline by raising the covered segments.
+// After placing an item, update the skyline by raising covered segments.
 function updateSkyline(
   skyline: SkylineNode[],
   pos: { x: number; y: number; startIdx: number; endIdx: number },
@@ -104,17 +107,21 @@ function updateSkyline(
   const itemRight = itemLeft + itemWidth
   const result: SkylineNode[] = []
 
+  // Keep segments before the affected range
   for (let i = 0; i < pos.startIdx; i++) {
     result.push({ ...skyline[i] })
   }
 
+  // Left remainder of the first affected segment
   const firstSeg = skyline[pos.startIdx]
   if (firstSeg.x < itemLeft - 0.001) {
     result.push({ x: firstSeg.x, y: firstSeg.y, width: itemLeft - firstSeg.x })
   }
 
+  // New raised segment for the item
   result.push({ x: itemLeft, y: newY, width: itemWidth })
 
+  // Right remainder of the last affected segment
   const lastIdx = pos.endIdx - 1
   const lastSeg = skyline[lastIdx]
   const lastSegEnd = lastSeg.x + lastSeg.width
@@ -122,6 +129,7 @@ function updateSkyline(
     result.push({ x: itemRight, y: lastSeg.y, width: lastSegEnd - itemRight })
   }
 
+  // Keep segments after the affected range
   for (let i = pos.endIdx; i < skyline.length; i++) {
     result.push({ ...skyline[i] })
   }
@@ -138,6 +146,54 @@ function updateSkyline(
   }
 
   return merged
+}
+
+/**
+ * Run skyline bin-packing with a given sort order of items.
+ * Returns the placed items array and the max Y reached.
+ */
+function runSkylinePacking(
+  expandedItems: { item: PrintItem; copyIndex: number }[],
+  config: GangSheetConfig
+): { placed: PlacedItem[]; maxY: number } {
+  const { printable_width_inches, spacing_inches, batch_label_height_inches } = config
+  const usableWidth = printable_width_inches - 2 * spacing_inches
+  const maxRight = printable_width_inches - spacing_inches
+
+  const placed: PlacedItem[] = []
+  let placedIdCounter = 0
+  const startY = batch_label_height_inches + spacing_inches
+  let skyline: SkylineNode[] = [{ x: spacing_inches, y: startY, width: usableWidth }]
+
+  for (const { item, copyIndex } of expandedItems) {
+    const w = item.width_inches
+    const h = item.height_inches
+
+    // Search for position — item needs w width, plus spacing gap after it
+    // But if the item touches the right margin, no trailing gap needed
+    const searchWidth = w + spacing_inches
+    const pos = findSkylinePosition(skyline, searchWidth, maxRight + spacing_inches)
+
+    if (pos) {
+      placed.push({
+        id: `placed-${placedIdCounter++}`,
+        item_id: item.id,
+        x: pos.x,
+        y: pos.y,
+        width: w,
+        height: h,
+        label: item.label,
+        invoice_number: item.invoice_number,
+        copy_index: copyIndex,
+      })
+
+      // Update skyline: the occupied region includes spacing
+      skyline = updateSkyline(skyline, pos, searchWidth, h + spacing_inches)
+    }
+  }
+
+  const maxY = skyline.reduce((max, seg) => Math.max(max, seg.y), startY)
+  return { placed, maxY }
 }
 
 /**
@@ -204,20 +260,18 @@ export function layoutGangSheet(
 /**
  * Skyline bin-packing layout for gang sheets.
  *
- * Tracks the top edge (skyline) of placed content and drops each new
- * item into the lowest available position, naturally filling gaps.
- * Artwork is NEVER rotated - DTF prints must keep original orientation.
+ * Tries multiple sort strategies and picks the one that produces
+ * the shortest (most compact) sheet. This compensates for the fact
+ * that no single sort order is optimal for all item mixes.
  *
- * Sort order: largest area first so big items get placed while the
- * skyline is still flat, then small items fill the remaining gaps.
+ * Artwork is NEVER rotated — DTF prints must keep original orientation.
  */
 export function layoutGangSheetOptimized(
   items: PrintItem[],
   batchNumber: number,
   config: GangSheetConfig = DEFAULT_GANG_SHEET_CONFIG
 ): GangSheetLayout {
-  const { printable_width_inches, spacing_inches, batch_label_height_inches } = config
-  const usableWidth = printable_width_inches - 2 * spacing_inches
+  const { printable_width_inches, batch_label_height_inches } = config
 
   // Expand items by quantity
   const expandedItems: { item: PrintItem; copyIndex: number }[] = []
@@ -227,62 +281,85 @@ export function layoutGangSheetOptimized(
     }
   }
 
-  // Sort: largest area first, then tallest, then widest
-  expandedItems.sort((a, b) => {
-    const areaA = a.item.width_inches * a.item.height_inches
-    const areaB = b.item.width_inches * b.item.height_inches
-    if (Math.abs(areaB - areaA) > 0.1) return areaB - areaA
-    const hDiff = b.item.height_inches - a.item.height_inches
-    if (Math.abs(hDiff) > 0.01) return hDiff
+  // Try multiple sort strategies — different orderings pack differently
+  const strategies: { item: PrintItem; copyIndex: number }[][] = []
+
+  // Strategy 1: Sort by height descending (classic shelf approach)
+  const byHeight = [...expandedItems].sort((a, b) => {
+    const hd = b.item.height_inches - a.item.height_inches
+    if (Math.abs(hd) > 0.01) return hd
     return b.item.width_inches - a.item.width_inches
   })
+  strategies.push(byHeight)
 
-  const placed: PlacedItem[] = []
-  let placedIdCounter = 0
+  // Strategy 2: Sort by width descending (fills horizontal space first)
+  const byWidth = [...expandedItems].sort((a, b) => {
+    const wd = b.item.width_inches - a.item.width_inches
+    if (Math.abs(wd) > 0.01) return wd
+    return b.item.height_inches - a.item.height_inches
+  })
+  strategies.push(byWidth)
 
-  // Initialize skyline: one flat segment spanning usable width
-  const startY = batch_label_height_inches + spacing_inches
-  let skyline: SkylineNode[] = [{ x: spacing_inches, y: startY, width: usableWidth }]
+  // Strategy 3: Sort by area descending (original approach)
+  const byArea = [...expandedItems].sort((a, b) => {
+    const aa = a.item.width_inches * a.item.height_inches
+    const ab = b.item.width_inches * b.item.height_inches
+    if (Math.abs(ab - aa) > 0.1) return ab - aa
+    return b.item.height_inches - a.item.height_inches
+  })
+  strategies.push(byArea)
 
-  for (const { item, copyIndex } of expandedItems) {
-    const w = item.width_inches
-    const h = item.height_inches
+  // Strategy 4: Group by similar width, then sort by height within groups
+  // This clusters same-width items into efficient rows
+  const byWidthGroup = [...expandedItems].sort((a, b) => {
+    // Round widths to nearest 0.5" to create groups
+    const gA = Math.round(a.item.width_inches * 2) / 2
+    const gB = Math.round(b.item.width_inches * 2) / 2
+    if (Math.abs(gB - gA) > 0.01) return gB - gA
+    return b.item.height_inches - a.item.height_inches
+  })
+  strategies.push(byWidthGroup)
 
-    // Find best position - NO rotation
-    const pos = findSkylinePosition(skyline, w + spacing_inches, printable_width_inches)
+  // Strategy 5: Sort by max dimension descending
+  const byMaxDim = [...expandedItems].sort((a, b) => {
+    const mA = Math.max(a.item.width_inches, a.item.height_inches)
+    const mB = Math.max(b.item.width_inches, b.item.height_inches)
+    if (Math.abs(mB - mA) > 0.01) return mB - mA
+    return b.item.width_inches * b.item.height_inches - a.item.width_inches * a.item.height_inches
+  })
+  strategies.push(byMaxDim)
 
-    if (pos) {
-      placed.push({
-        id: `placed-${placedIdCounter++}`,
-        item_id: item.id,
-        x: pos.x,
-        y: pos.y,
-        width: w,
-        height: h,
-        label: item.label,
-        invoice_number: item.invoice_number,
-        copy_index: copyIndex,
-      })
+  // Run all strategies and pick the one with smallest maxY (shortest sheet)
+  let bestPlaced: PlacedItem[] = []
+  let bestMaxY = Infinity
 
-      skyline = updateSkyline(skyline, pos, w + spacing_inches, h + spacing_inches)
+  for (const sortedItems of strategies) {
+    const result = runSkylinePacking(sortedItems, config)
+    if (result.placed.length === expandedItems.length && result.maxY < bestMaxY) {
+      bestMaxY = result.maxY
+      bestPlaced = result.placed
     }
   }
 
-  // Sheet height = tallest point on skyline + bottom label
-  const maxY = skyline.reduce((max, seg) => Math.max(max, seg.y), startY)
-  const sheetHeight = maxY + batch_label_height_inches
+  // Fallback: if no strategy placed everything, use first strategy result
+  if (bestPlaced.length === 0) {
+    const fallback = runSkylinePacking(strategies[0], config)
+    bestPlaced = fallback.placed
+    bestMaxY = fallback.maxY
+  }
 
-  const totalPrintArea = placed.reduce((sum, p) => sum + p.width * p.height, 0)
+  const sheetHeight = bestMaxY + batch_label_height_inches
+  const totalPrintArea = bestPlaced.reduce((sum, p) => sum + p.width * p.height, 0)
   const sheetArea = printable_width_inches * sheetHeight
   const utilization = sheetArea > 0 ? (totalPrintArea / sheetArea) * 100 : 0
 
   return {
     batch_number: batchNumber,
-    placed_items: placed,
+    placed_items: bestPlaced,
     sheet_width: printable_width_inches,
     sheet_height: Math.round(sheetHeight * 100) / 100,
     utilization_percent: Math.round(utilization * 10) / 10,
-    total_items: placed.length,
+    total_items: bestPlaced.length,
   }
 }
 

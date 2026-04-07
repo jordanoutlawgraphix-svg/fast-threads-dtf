@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import * as store from '@/lib/store'
-import { layoutGangSheetOptimized, PrintItem } from '@/lib/gang-sheet-engine'
+import { layoutGangSheetOptimized, PrintItem, GangSheetLayout } from '@/lib/gang-sheet-engine'
 import { JobItem, JobSubmission, Batch, PLACEMENT_LABELS, DEFAULT_GANG_SHEET_CONFIG } from '@/types'
 import Link from 'next/link'
 
@@ -12,7 +12,7 @@ export default function BatchPage() {
   const [unbatchedItems, setUnbatchedItems] = useState<UnbatchedItem[]>([])
 const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set())
 const [batches, setBatches] = useState<Batch[]>([])
-const [previewLayout, setPreviewLayout] = useState<ReturnType<typeof layoutGangSheetOptimized> | null>(null)
+const [previewLayout, setPreviewLayout] = useState<GangSheetLayout | null>(null)
 const [loading, setLoading] = useState(true)
 const [creating, setCreating] = useState(false)
 const [confirmDeleteBatch, setConfirmDeleteBatch] = useState<string | null>(null)
@@ -37,7 +37,7 @@ const selectAll = () => {
     else setSelectedItems(new Set(unbatchedItems.map(i => i.id)))
   }
 const [previewImageUrls, setPreviewImageUrls] = useState<Record<string, string>>({})
-const previewGangSheet = () => {
+const previewGangSheet = async () => {
     const printItems: PrintItem[] = unbatchedItems
       .filter(i => selectedItems.has(i.id))
       .map(i => ({
@@ -58,7 +58,7 @@ for (const p of printItems) {
     }
     setPreviewImageUrls(imageMap)
 const nextBatchNum = batches.length > 0 ? Math.max(...batches.map(b => b.batch_number)) + 1 : 1
-    const layout = layoutGangSheetOptimized(printItems, nextBatchNum, DEFAULT_GANG_SHEET_CONFIG)
+    const layout = await layoutGangSheetOptimized(printItems, nextBatchNum, DEFAULT_GANG_SHEET_CONFIG, imageMap)
     setPreviewLayout(layout)
   }
 const createBatch = async () => {
@@ -230,7 +230,7 @@ const statusColors: Record<string, string> = {
   )
 }
 
-function GangSheetPreview({ layout, imageUrls = {} }: { layout: ReturnType<typeof layoutGangSheetOptimized>; imageUrls?: Record<string, string> }) {
+function GangSheetPreview({ layout, imageUrls = {} }: { layout: GangSheetLayout; imageUrls?: Record<string, string> }) {
   const scale = 20
   const svgWidth = layout.sheet_width * scale
   const svgHeight = layout.sheet_height * scale

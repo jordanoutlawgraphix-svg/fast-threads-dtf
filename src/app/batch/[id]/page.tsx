@@ -86,8 +86,13 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
           invoice_number: bi.job.invoice_number,
         })
       }
-      const layout = layoutGangSheetOptimized(printItems, batch.batch_number, DEFAULT_GANG_SHEET_CONFIG)
-      await downloadGangSheetPNG(layout, { renderImages: true, imageUrls })
+      const layout = await layoutGangSheetOptimized(
+        printItems,
+        batch.batch_number,
+        DEFAULT_GANG_SHEET_CONFIG,
+        imageUrls,
+      )
+      await downloadGangSheetPNG(layout)
     } catch (err) {
       console.error('Export failed:', err)
     } finally {

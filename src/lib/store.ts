@@ -161,6 +161,53 @@ export async function updateJobItemQuantity(jobItemId: string, quantity: number)
   return true
 }
 
+export async function deleteJobItem(jobItemId: string): Promise<boolean> {
+  // Look up the file path so we can clean up storage too.
+  const { data: item } = await supabase
+    .from('job_items')
+    .select('file_path')
+    .eq('id', jobItemId)
+    .single()
+
+  // Remove any batch_items pointing at this job_item first (FK safety).
+  await supabase.from('batch_items').delete().eq('job_item_id', jobItemId)
+
+  const { error } = await supabase.from('job_items').delete().eq('id', jobItemId)
+  if (error) { console.error('deleteJobItem error:', error); return false }
+
+  if (item?.file_path) {
+    const { error: storageErr } = await supabase.storage.from(BUCKET).remove([item.file_path])
+    if (storageErr) console.warn('deleteJobItem storage cleanup warning:', storageErr)
+  }
+  return true
+}
+
+export async function deleteJob(jobId: string): Promise<boolean> {
+  // Pull every file under this job so we can wipe them in one storage call.
+  const { data: items } = await supabase
+    .from('job_items')
+    .select('id, file_path')
+    .eq('job_id', jobId)
+
+  const itemIds = (items || []).map(i => i.id)
+  if (itemIds.length > 0) {
+    await supabase.from('batch_items').delete().in('job_item_id', itemIds)
+  }
+
+  const { error: itemsErr } = await supabase.from('job_items').delete().eq('job_id', jobId)
+  if (itemsErr) { console.error('deleteJob items error:', itemsErr); return false }
+
+  const { error: jobErr } = await supabase.from('jobs').delete().eq('id', jobId)
+  if (jobErr) { console.error('deleteJob error:', jobErr); return false }
+
+  const paths = (items || []).map(i => i.file_path).filter(Boolean) as string[]
+  if (paths.length > 0) {
+    const { error: storageErr } = await supabase.storage.from(BUCKET).remove(paths)
+    if (storageErr) console.warn('deleteJob storage cleanup warning:', storageErr)
+  }
+  return true
+}
+
 // ---- File Storage ----
 export async function uploadFile(file: File, path: string): Promise<string | null> {
   const { error } = await supabase.storage.from(BUCKET).upload(path, file, {

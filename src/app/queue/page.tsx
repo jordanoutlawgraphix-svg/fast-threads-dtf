@@ -28,6 +28,29 @@ export default function QueuePage() {
     setExpandedJob(jobId)
   }
 
+  const handleDeleteItem = async (jobId: string, itemId: string, filename: string) => {
+    if (!confirm(`Delete "${filename}" from this job? This cannot be undone.`)) return
+    const ok = await store.deleteJobItem(itemId)
+    if (!ok) { alert('Failed to delete print item.'); return }
+    const remaining = (jobItems[jobId] || []).filter(i => i.id !== itemId)
+    setJobItems(prev => ({ ...prev, [jobId]: remaining }))
+    // If the job is now empty, drop it from the queue too.
+    if (remaining.length === 0) {
+      await store.deleteJob(jobId)
+      setJobs(prev => prev.filter(j => j.id !== jobId))
+      setExpandedJob(null)
+    }
+  }
+
+  const handleDeleteJob = async (jobId: string, invoiceNumber: string) => {
+    if (!confirm(`Delete the entire job #${invoiceNumber} and all its print items? This cannot be undone.`)) return
+    const ok = await store.deleteJob(jobId)
+    if (!ok) { alert('Failed to delete job.'); return }
+    setJobs(prev => prev.filter(j => j.id !== jobId))
+    setJobItems(prev => { const next = { ...prev }; delete next[jobId]; return next })
+    if (expandedJob === jobId) setExpandedJob(null)
+  }
+
   const statusColors: Record<string, string> = {
     submitted: 'bg-yellow-500/20 text-yellow-300',
     reviewed: 'bg-blue-500/20 text-blue-300',
@@ -71,6 +94,16 @@ export default function QueuePage() {
                 </div>
                 <div className="flex items-center gap-4">
                   <span className="text-xs text-gray-500">{new Date(job.created_at).toLocaleString()}</span>
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    onClick={(e) => { e.stopPropagation(); handleDeleteJob(job.id, job.invoice_number) }}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); handleDeleteJob(job.id, job.invoice_number) } }}
+                    className="px-2 py-1 text-xs text-red-300 hover:text-white hover:bg-red-600/40 rounded border border-red-800/50 cursor-pointer"
+                    title="Delete entire job"
+                  >
+                    Delete Job
+                  </span>
                   <svg className={`w-4 h-4 text-gray-500 transition-transform ${expandedJob === job.id ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
@@ -96,6 +129,13 @@ export default function QueuePage() {
                             <p className="text-lg font-bold">{item.quantity}</p>
                             <p className="text-xs text-gray-500">qty</p>
                           </div>
+                          <button
+                            onClick={() => handleDeleteItem(job.id, item.id, item.original_filename)}
+                            className="ml-2 px-2 py-1 text-xs text-red-300 hover:text-white hover:bg-red-600/40 rounded border border-red-800/50"
+                            title="Delete this print item"
+                          >
+                            Delete
+                          </button>
                         </div>
                       )
                     })}

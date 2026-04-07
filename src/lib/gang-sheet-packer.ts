@@ -483,3 +483,198 @@ export function drawPlacementToCanvas(
   )
   ctx.restore()
 }
+
+// ---------------------------------------------------------------
+// Multi-strategy retry wrapper.
+//
+// MaxRects is sensitive to input order. A single sort often leaves
+// awkward free-rect strips that waste vertical space. We run the
+// placement step several times with different sort orders against
+// the same set of expanded copies, then pick the result with the
+// smallest overall used height (fewer sheets preferred).
+//
+// The existing `packGangSheets` path is untouched — this is a
+// drop-in alternative callers can opt into.
+// ---------------------------------------------------------------
+
+export type PackSortStrategy =
+  | 'area'
+  | 'maxSide'
+  | 'height'
+  | 'width'
+  | 'perimeter'
+
+const STRATEGY_COMPARATORS: Record<
+  PackSortStrategy,
+  (a: ExpandedCopy, b: ExpandedCopy) => number
+> = {
+  area: (a, b) => b.packWidth * b.packHeight - a.packWidth * a.packHeight,
+  maxSide: (a, b) =>
+    Math.max(b.packWidth, b.packHeight) - Math.max(a.packWidth, a.packHeight),
+  height: (a, b) => b.packHeight - a.packHeight,
+  width: (a, b) => b.packWidth - a.packWidth,
+  perimeter: (a, b) =>
+    b.packWidth + b.packHeight - (a.packWidth + a.packHeight),
+}
+
+function sortCopies(
+  copies: ExpandedCopy[],
+  strategy: PackSortStrategy,
+): ExpandedCopy[] {
+  const primary = STRATEGY_COMPARATORS[strategy]
+  const sorted = copies.slice()
+  sorted.sort((a, b) => {
+    const d = primary(a, b)
+    if (d !== 0) return d
+    // Stable deterministic tiebreakers.
+    const longA = Math.max(a.packWidth, a.packHeight)
+    const longB = Math.max(b.packWidth, b.packHeight)
+    if (longB !== longA) return longB - longA
+    const shortA = Math.min(a.packWidth, a.packHeight)
+    const shortB = Math.min(b.packWidth, b.packHeight)
+    if (shortB !== shortA) return shortB - shortA
+    return a.uid.localeCompare(b.uid)
+  })
+  return sorted
+}
+
+function placeCopiesOnSheets(
+  copies: ExpandedCopy[],
+  options: PackOptions,
+): PackedSheet[] {
+  const sheets: Array<{ bin: MaxRectsBin; placements: Placement[] }> = []
+
+  for (const copy of copies) {
+    if (!canEverFit(copy, options)) {
+      throw new Error(
+        `Artwork ${copy.artworkId} cannot fit on the sheet with current size, gutter, and edge padding.`,
+      )
+    }
+
+    const allowRotate = (options.allowGlobalRotate ?? true) && copy.allowRotate
+    let bestSheetIndex = -1
+    let bestPlacement: ScoredPlacement | null = null
+
+    for (let sheetIndex = 0; sheetIndex < sheets.length; sheetIndex += 1) {
+      const candidate = sheets[sheetIndex].bin.findPosition(
+        copy.packWidth,
+        copy.packHeight,
+        allowRotate,
+      )
+      if (!candidate) continue
+      if (
+        !bestPlacement ||
+        candidate.scoreShortSide < bestPlacement.scoreShortSide ||
+        (candidate.scoreShortSide === bestPlacement.scoreShortSide &&
+          candidate.scoreLongSide < bestPlacement.scoreLongSide) ||
+        (candidate.scoreShortSide === bestPlacement.scoreShortSide &&
+          candidate.scoreLongSide === bestPlacement.scoreLongSide &&
+          sheetIndex < bestSheetIndex)
+      ) {
+        bestSheetIndex = sheetIndex
+        bestPlacement = candidate
+      }
+    }
+
+    if (bestSheetIndex === -1 || !bestPlacement) {
+      sheets.push({ bin: createBin(options), placements: [] })
+      bestSheetIndex = sheets.length - 1
+      bestPlacement = sheets[bestSheetIndex].bin.findPosition(
+        copy.packWidth,
+        copy.packHeight,
+        allowRotate,
+      )
+      if (!bestPlacement) {
+        throw new Error(
+          `Artwork ${copy.artworkId} could not be placed on a fresh sheet.`,
+        )
+      }
+    }
+
+    sheets[bestSheetIndex].bin.place({
+      x: bestPlacement.x,
+      y: bestPlacement.y,
+      width: bestPlacement.width,
+      height: bestPlacement.height,
+    })
+
+    sheets[bestSheetIndex].placements.push({
+      ...copy,
+      sheetIndex: bestSheetIndex,
+      x: roundPx(bestPlacement.x),
+      y: roundPx(bestPlacement.y),
+      width: roundPx(bestPlacement.width),
+      height: roundPx(bestPlacement.height),
+      rotated: bestPlacement.rotated,
+    })
+  }
+
+  return sheets.map((sheet, index) => {
+    const edgePadding = options.edgePadding ?? 0
+    const usedBottom = sheet.placements.reduce((max, p) => {
+      return Math.max(max, p.y + p.height)
+    }, edgePadding)
+    return {
+      index,
+      width: options.sheetWidth,
+      height: options.maxSheetHeight,
+      usedHeight: Math.min(
+        options.maxSheetHeight,
+        Math.ceil(usedBottom + edgePadding),
+      ),
+      placements: sheet.placements,
+    }
+  })
+}
+
+/**
+ * Multi-strategy pack. Tries several sort orders against the same
+ * expanded copies and returns the result with the lowest score.
+ *
+ * Score = (sheetCount * 1e6) + sum(usedHeight of each sheet)
+ *   - Fewer sheets always wins.
+ *   - Among same-sheet-count results, shorter total usage wins.
+ *   - Strategy index is the stable tiebreaker.
+ */
+export function packGangSheetsBestOf(
+  artworks: ArtworkInput[],
+  options: PackOptions,
+  strategies: PackSortStrategy[] = [
+    'area',
+    'maxSide',
+    'height',
+    'width',
+    'perimeter',
+  ],
+): PackedSheet[] {
+  // expandCopies already applies its own sort, but we'll re-sort per
+  // strategy below, so its output order here doesn't matter.
+  const baseCopies = expandCopies(artworks, options)
+
+  let best: PackedSheet[] | null = null
+  let bestScore = Number.POSITIVE_INFINITY
+
+  for (let i = 0; i < strategies.length; i += 1) {
+    const strategy = strategies[i]
+    const sorted = sortCopies(baseCopies, strategy)
+    let sheets: PackedSheet[]
+    try {
+      sheets = placeCopiesOnSheets(sorted, options)
+    } catch {
+      continue
+    }
+    const totalUsed = sheets.reduce((s, sh) => s + sh.usedHeight, 0)
+    const score = sheets.length * 1_000_000 + totalUsed
+    if (score < bestScore) {
+      bestScore = score
+      best = sheets
+    }
+  }
+
+  if (!best) {
+    // Every strategy threw — fall back to the original single-pass
+    // packer so callers see a useful error message.
+    return packGangSheets(artworks, options)
+  }
+  return best
+}

@@ -20,7 +20,7 @@ import {
   ArtworkInput,
   PackOptions,
   Placement,
-  packGangSheets,
+  packGangSheetsBestOf,
   resolveTargetSize,
   trimAlphaBoundsRGBA,
 } from './gang-sheet-packer'
@@ -201,7 +201,7 @@ export async function layoutGangSheetOptimized(
     allowGlobalRotate: false,
   }
 
-  const sheets = packGangSheets(artworks, packOptions)
+  const sheets = packGangSheetsBestOf(artworks, packOptions)
   const sheet = sheets[0] ?? {
     index: 0,
     width: printable_width_inches,

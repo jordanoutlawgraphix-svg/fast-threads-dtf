@@ -131,8 +131,6 @@ const handlePlacementChange = (index: number, placement: PlacementType) => {
         placement,
         suggested_width_inches: sizing.target_width_inches,
         suggested_height_inches: sizing.target_height_inches,
-        confirmed_width_inches: sizing.target_width_inches,
-        confirmed_height_inches: sizing.target_height_inches,
         size_confirmed: false,
       })
 } else {
@@ -153,8 +151,6 @@ const handleAgeChange = (index: number, garmentAge: GarmentAge) => {
         garment_age: garmentAge,
         suggested_width_inches: sizing.target_width_inches,
         suggested_height_inches: sizing.target_height_inches,
-        confirmed_width_inches: sizing.target_width_inches,
-        confirmed_height_inches: sizing.target_height_inches,
         size_confirmed: false,
       })
 } else {

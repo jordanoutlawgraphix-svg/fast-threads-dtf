@@ -43,14 +43,26 @@ export function calculateTargetSize(
   customProfiles?: Omit<SizeProfile, 'id'>[]
 ): SizingResult {
   const dpi = sourceDpi || 300
-
-  // Always use actual file dimensions — never override
   const actualWidthInches = sourceWidthPx / dpi
   const actualHeightInches = sourceHeightPx / dpi
 
+  // Suggested size = fit the file's aspect ratio into the placement profile's
+  // recommended max box. Falls back to the actual file size if no profile.
+  const profile = getSizeProfile(placement, garmentAge, customProfiles)
+  let targetW = actualWidthInches
+  let targetH = actualHeightInches
+  if (profile && actualWidthInches > 0 && actualHeightInches > 0) {
+    const scale = Math.min(
+      profile.width_inches / actualWidthInches,
+      profile.height_inches / actualHeightInches,
+    )
+    targetW = actualWidthInches * scale
+    targetH = actualHeightInches * scale
+  }
+
   return {
-    target_width_inches: Math.round(actualWidthInches * 100) / 100,
-    target_height_inches: Math.round(actualHeightInches * 100) / 100,
+    target_width_inches: Math.round(targetW * 100) / 100,
+    target_height_inches: Math.round(targetH * 100) / 100,
     source_dpi_at_target: dpi,
     quality_warning: null,
     auto_resized: false,

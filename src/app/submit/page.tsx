@@ -574,13 +574,23 @@ function ItemForm({ index, item, onUpdate, onFileChange, onPlacementChange, onAg
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Width (inches)</label>
                   <input type="number" step="0.25" min="0.5" value={item.confirmed_width_inches}
-                    onChange={e => onUpdate(index, { confirmed_width_inches: parseFloat(e.target.value) || 0, size_confirmed: false })}
+                    onChange={e => {
+                      const newWidth = parseFloat(e.target.value) || 0
+                      const aspect = item.detected_width_px / item.detected_height_px
+                      const newHeight = aspect > 0 ? Math.round((newWidth / aspect) * 100) / 100 : item.confirmed_height_inches
+                      onUpdate(index, { confirmed_width_inches: newWidth, confirmed_height_inches: newHeight, size_confirmed: false })
+                    }}
                     className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-orange-500" />
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Height (inches)</label>
                   <input type="number" step="0.25" min="0.5" value={item.confirmed_height_inches}
-                    onChange={e => onUpdate(index, { confirmed_height_inches: parseFloat(e.target.value) || 0, size_confirmed: false })}
+                    onChange={e => {
+                      const newHeight = parseFloat(e.target.value) || 0
+                      const aspect = item.detected_width_px / item.detected_height_px
+                      const newWidth = aspect > 0 ? Math.round((newHeight * aspect) * 100) / 100 : item.confirmed_width_inches
+                      onUpdate(index, { confirmed_height_inches: newHeight, confirmed_width_inches: newWidth, size_confirmed: false })
+                    }}
                     className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-white text-sm focus:outline-none focus:border-orange-500" />
                 </div>
               </div>

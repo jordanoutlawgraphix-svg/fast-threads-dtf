@@ -139,7 +139,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
     if (!batch) return
     setExporting(true)
     try {
-      const summaryDoc = generateBatchSummaryPDF(batch, batchItems)
+      const summaryDoc = generateBatchSummaryPDF(batch, batchItems, thumbnails)
       await downloadBatchZip(
         batch,
         batchItems,
@@ -160,7 +160,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
 
   const handleDownloadPDF = () => {
     if (!batch) return
-    downloadBatchSummaryPDF(batch, batchItems)
+    downloadBatchSummaryPDF(batch, batchItems, thumbnails)
   }
 
   if (loading) {

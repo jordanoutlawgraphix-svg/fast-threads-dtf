@@ -12,16 +12,21 @@ type EnrichedBatchItem = BatchItem & { job_item: JobItem; job: JobSubmission }
 /**
  * Generate a summary PDF for a batch.
  * Groups items by invoice number and shows placement details, sizes, quantities.
+ *
+ * @param thumbnails  Optional map of job_item_id → data URL (PNG) for preview images.
+ *                    If provided, a thumbnail column is included in the PDF.
  */
 export function generateBatchSummaryPDF(
   batch: Batch,
-  batchItems: EnrichedBatchItem[]
+  batchItems: EnrichedBatchItem[],
+  thumbnails?: Record<string, string>
 ): jsPDF {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' })
   const pageWidth = doc.internal.pageSize.getWidth()
   const margin = 40
   const contentWidth = pageWidth - margin * 2
   let y = margin
+  const thumbSize = 40 // px for thumbnail in PDF  const rowHeight = thumbnails ? Math.max(thumbSize + 8, 18) : 18
 
   // ---- Header ----
   doc.setFillColor(249, 115, 22) // orange
@@ -51,6 +56,16 @@ export function generateBatchSummaryPDF(
   doc.setLineWidth(1.5)
   doc.line(margin, y, pageWidth - margin, y)
   y += 15
+  // ---- Column layout (shifts if thumbnails are present) ----
+  const thumbColW = thumbnails ? 50 : 0
+  const cols = [
+    { label: 'Preview', x: margin + 8, w: thumbColW },
+    { label: 'File', x: margin + 8 + thumbColW, w: 140 },
+    { label: 'Placement', x: margin + 8 + thumbColW + 140, w: 100 },
+    { label: 'Size', x: margin + 8 + thumbColW + 240, w: 80 },
+    { label: 'Adult Qty', x: margin + 8 + thumbColW + 320, w: 55 },
+    { label: 'Youth Qty', x: margin + 8 + thumbColW + 380, w: 55 },
+  ]
 
   // ---- Group by invoice ----
   const groupedByInvoice: Record<string, EnrichedBatchItem[]> = {}
@@ -66,7 +81,6 @@ export function generateBatchSummaryPDF(
       doc.addPage()
       y = margin
     }
-
     // Invoice header
     doc.setFillColor(240, 240, 240)
     doc.rect(margin, y - 4, contentWidth, 22, 'F')
@@ -94,14 +108,7 @@ export function generateBatchSummaryPDF(
     doc.setTextColor(80, 80, 80)
     doc.setFontSize(8)
     doc.setFont('helvetica', 'bold')
-    const cols = [
-      { label: 'File', x: margin + 8, w: 160 },
-      { label: 'Placement', x: margin + 170, w: 100 },
-      { label: 'Size', x: margin + 275, w: 80 },
-      { label: 'Adult Qty', x: margin + 365, w: 55 },
-      { label: 'Youth Qty', x: margin + 425, w: 55 },
-    ]
-    for (const col of cols) {
+    const headerCols = thumbnails ? cols : cols.slice(1) // skip Preview col if no thumbs    for (const col of headerCols) {
       doc.text(col.label, col.x, y)
     }
     y += 4
@@ -115,32 +122,51 @@ export function generateBatchSummaryPDF(
     doc.setFontSize(9)
     doc.setTextColor(30, 30, 30)
 
-    for (const { item, count } of seen.values()) {
-      if (y > doc.internal.pageSize.getHeight() - 60) {
+    for (const { item } of seen.values()) {
+      if (y > doc.internal.pageSize.getHeight() - 80) {
         doc.addPage()
         y = margin
       }
 
-      const filename = item.job_item.original_filename.length > 28
-        ? item.job_item.original_filename.substring(0, 25) + '...'
+      // Thumbnail
+      if (thumbnails) {
+        const thumbDataUrl = thumbnails[item.job_item_id]
+        if (thumbDataUrl) {
+          try {
+            doc.addImage(thumbDataUrl, 'PNG', cols[0].x, y - 6, thumbSize, thumbSize)
+          } catch {
+            // If image fails, just skip it
+          }
+        }
+      }
+      // Text baseline — vertically center in the row
+      const textY = thumbnails ? y + thumbSize / 2 : y
+
+      const filename = item.job_item.original_filename.length > 24
+        ? item.job_item.original_filename.substring(0, 21) + '...'
         : item.job_item.original_filename
 
       const placement = PLACEMENT_LABELS[item.job_item.placement] +
         (item.job_item.custom_placement_name ? ` (${item.job_item.custom_placement_name})` : '')
 
       const size = `${item.job_item.target_width_inches}" x ${item.job_item.target_height_inches}"`
-      const adultQty = item.job_item.garment_age === 'adult' ? String(count) : '-'
-      const youthQty = item.job_item.garment_age === 'youth' ? String(count) : '-'
+      const adultQty = item.job_item.garment_age === 'adult' ? String(item.job_item.quantity) : '-'
+      const youthQty = item.job_item.garment_age === 'youth' ? String(item.job_item.quantity) : '-'
 
-      doc.text(filename, cols[0].x, y)
-      doc.text(placement, cols[1].x, y)
-      doc.text(size, cols[2].x, y)
+      const fileCol = cols[1]
+      const placeCol = cols[2]
+      const sizeCol = cols[3]
+      const adultCol = cols[4]
+      const youthCol = cols[5]
+
+      doc.text(filename, fileCol.x, textY)
+      doc.text(placement, placeCol.x, textY)
+      doc.text(size, sizeCol.x, textY)
       doc.setFont('helvetica', 'bold')
-      doc.text(adultQty, cols[3].x + 20, y, { align: 'center' })
-      doc.text(youthQty, cols[4].x + 20, y, { align: 'center' })
+      doc.text(adultQty, adultCol.x + 20, textY, { align: 'center' })
+      doc.text(youthQty, youthCol.x + 20, textY, { align: 'center' })
       doc.setFont('helvetica', 'normal')
-
-      y += 14
+      y += rowHeight
       doc.setDrawColor(230, 230, 230)
       doc.line(margin + 8, y - 4, pageWidth - margin, y - 4)
     }
@@ -167,7 +193,6 @@ export function generateBatchSummaryPDF(
       pageH - 35,
       { align: 'center' }
     )
-
     doc.setFontSize(7)
     doc.setFont('helvetica', 'normal')
     doc.setTextColor(150, 150, 150)
@@ -183,8 +208,9 @@ export function generateBatchSummaryPDF(
  */
 export function downloadBatchSummaryPDF(
   batch: Batch,
-  batchItems: EnrichedBatchItem[]
+  batchItems: EnrichedBatchItem[],
+  thumbnails?: Record<string, string>
 ): void {
-  const doc = generateBatchSummaryPDF(batch, batchItems)
+  const doc = generateBatchSummaryPDF(batch, batchItems, thumbnails)
   doc.save(`batch-${batch.batch_number}-summary.pdf`)
 }

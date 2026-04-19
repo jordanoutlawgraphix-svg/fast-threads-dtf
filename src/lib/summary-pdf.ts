@@ -13,7 +13,7 @@ type EnrichedBatchItem = BatchItem & { job_item: JobItem; job: JobSubmission }
  * Generate a summary PDF for a batch.
  * Groups items by invoice number and shows placement details, sizes, quantities.
  *
- * @param thumbnails  Optional map of job_item_id → data URL (PNG) for preview images.
+ * @param thumbnails  Optional map of job_item_id -> data URL (PNG) for preview images.
  *                    If provided, a thumbnail column is included in the PDF.
  */
 export function generateBatchSummaryPDF(
@@ -26,17 +26,18 @@ export function generateBatchSummaryPDF(
   const margin = 40
   const contentWidth = pageWidth - margin * 2
   let y = margin
-  const thumbSize = 40 // px for thumbnail in PDF  const rowHeight = thumbnails ? Math.max(thumbSize + 8, 18) : 18
+  const thumbSize = 40
+  const rowHeight = thumbnails ? Math.max(thumbSize + 8, 18) : 18
 
   // ---- Header ----
-  doc.setFillColor(249, 115, 22) // orange
+  doc.setFillColor(249, 115, 22)
   doc.rect(0, 0, pageWidth, 60, 'F')
   doc.setTextColor(255, 255, 255)
   doc.setFontSize(20)
   doc.setFont('helvetica', 'bold')
-  doc.text('Fast Threads DTF — Batch Summary', margin, 38)
+  doc.text('Fast Threads DTF \u2014 Batch Summary', margin, 38)
   doc.setFontSize(28)
-  doc.text(`#${batch.batch_number}`, pageWidth - margin, 38, { align: 'right' })
+  doc.text('#' + batch.batch_number, pageWidth - margin, 38, { align: 'right' })
 
   y = 80
 
@@ -45,7 +46,7 @@ export function generateBatchSummaryPDF(
   doc.setFontSize(10)
   doc.setFont('helvetica', 'normal')
   doc.text(
-    `Batch #${batch.batch_number}  |  ${new Date(batch.created_at).toLocaleDateString()}  |  ${batch.total_items} total prints  |  Status: ${batch.status.toUpperCase()}`,
+    'Batch #' + batch.batch_number + '  |  ' + new Date(batch.created_at).toLocaleDateString() + '  |  ' + batch.total_items + ' total prints  |  Status: ' + batch.status.toUpperCase(),
     margin,
     y
   )
@@ -56,7 +57,8 @@ export function generateBatchSummaryPDF(
   doc.setLineWidth(1.5)
   doc.line(margin, y, pageWidth - margin, y)
   y += 15
-  // ---- Column layout (shifts if thumbnails are present) ----
+
+  // ---- Column layout ----
   const thumbColW = thumbnails ? 50 : 0
   const cols = [
     { label: 'Preview', x: margin + 8, w: thumbColW },
@@ -76,25 +78,25 @@ export function generateBatchSummaryPDF(
   }
 
   for (const [invoiceNum, items] of Object.entries(groupedByInvoice)) {
-    // Check if we need a new page
     if (y > doc.internal.pageSize.getHeight() - 120) {
       doc.addPage()
       y = margin
     }
+
     // Invoice header
     doc.setFillColor(240, 240, 240)
     doc.rect(margin, y - 4, contentWidth, 22, 'F')
     doc.setTextColor(0, 0, 0)
     doc.setFontSize(12)
     doc.setFont('helvetica', 'bold')
-    doc.text(`Invoice: ${invoiceNum}`, margin + 8, y + 12)
+    doc.text('Invoice: ' + invoiceNum, margin + 8, y + 12)
     doc.setFont('helvetica', 'normal')
     doc.setFontSize(9)
     doc.setTextColor(100, 100, 100)
-    doc.text(`${items[0].job.location_code}  |  ${items[0].job.submitter_name}`, pageWidth - margin - 8, y + 12, { align: 'right' })
+    doc.text(items[0].job.location_code + '  |  ' + items[0].job.submitter_name, pageWidth - margin - 8, y + 12, { align: 'right' })
     y += 28
 
-    // Deduplicate items for this invoice
+    // Deduplicate items
     const seen = new Map<string, { item: EnrichedBatchItem; count: number }>()
     for (const bi of items) {
       if (!seen.has(bi.job_item_id)) {
@@ -108,7 +110,8 @@ export function generateBatchSummaryPDF(
     doc.setTextColor(80, 80, 80)
     doc.setFontSize(8)
     doc.setFont('helvetica', 'bold')
-    const headerCols = thumbnails ? cols : cols.slice(1) // skip Preview col if no thumbs    for (const col of headerCols) {
+    const headerCols = thumbnails ? cols : cols.slice(1)
+    for (const col of headerCols) {
       doc.text(col.label, col.x, y)
     }
     y += 4
@@ -135,11 +138,11 @@ export function generateBatchSummaryPDF(
           try {
             doc.addImage(thumbDataUrl, 'PNG', cols[0].x, y - 6, thumbSize, thumbSize)
           } catch {
-            // If image fails, just skip it
+            // skip
           }
         }
       }
-      // Text baseline — vertically center in the row
+
       const textY = thumbnails ? y + thumbSize / 2 : y
 
       const filename = item.job_item.original_filename.length > 24
@@ -147,25 +150,20 @@ export function generateBatchSummaryPDF(
         : item.job_item.original_filename
 
       const placement = PLACEMENT_LABELS[item.job_item.placement] +
-        (item.job_item.custom_placement_name ? ` (${item.job_item.custom_placement_name})` : '')
+        (item.job_item.custom_placement_name ? ' (' + item.job_item.custom_placement_name + ')' : '')
 
-      const size = `${item.job_item.target_width_inches}" x ${item.job_item.target_height_inches}"`
+      const size = item.job_item.target_width_inches + '" x ' + item.job_item.target_height_inches + '"'
       const adultQty = item.job_item.garment_age === 'adult' ? String(item.job_item.quantity) : '-'
       const youthQty = item.job_item.garment_age === 'youth' ? String(item.job_item.quantity) : '-'
 
-      const fileCol = cols[1]
-      const placeCol = cols[2]
-      const sizeCol = cols[3]
-      const adultCol = cols[4]
-      const youthCol = cols[5]
-
-      doc.text(filename, fileCol.x, textY)
-      doc.text(placement, placeCol.x, textY)
-      doc.text(size, sizeCol.x, textY)
+      doc.text(filename, cols[1].x, textY)
+      doc.text(placement, cols[2].x, textY)
+      doc.text(size, cols[3].x, textY)
       doc.setFont('helvetica', 'bold')
-      doc.text(adultQty, adultCol.x + 20, textY, { align: 'center' })
-      doc.text(youthQty, youthCol.x + 20, textY, { align: 'center' })
+      doc.text(adultQty, cols[4].x + 20, textY, { align: 'center' })
+      doc.text(youthQty, cols[5].x + 20, textY, { align: 'center' })
       doc.setFont('helvetica', 'normal')
+
       y += rowHeight
       doc.setDrawColor(230, 230, 230)
       doc.line(margin + 8, y - 4, pageWidth - margin, y - 4)
@@ -188,16 +186,17 @@ export function generateBatchSummaryPDF(
     doc.setFontSize(10)
     doc.setFont('helvetica', 'bold')
     doc.text(
-      `BATCH #${batch.batch_number} — ${batch.total_items} TOTAL PRINTS — Match this sheet to your NeoStampa output`,
+      'BATCH #' + batch.batch_number + ' \u2014 ' + batch.total_items + ' TOTAL PRINTS \u2014 Match this sheet to your NeoStampa output',
       pageWidth / 2,
       pageH - 35,
       { align: 'center' }
     )
+
     doc.setFontSize(7)
     doc.setFont('helvetica', 'normal')
     doc.setTextColor(150, 150, 150)
     doc.text('Fast Threads Inc. DTF Workflow Manager', pageWidth / 2, pageH - 22, { align: 'center' })
-    doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin, pageH - 22, { align: 'right' })
+    doc.text('Page ' + i + ' of ' + pageCount, pageWidth - margin, pageH - 22, { align: 'right' })
   }
 
   return doc
@@ -212,5 +211,5 @@ export function downloadBatchSummaryPDF(
   thumbnails?: Record<string, string>
 ): void {
   const doc = generateBatchSummaryPDF(batch, batchItems, thumbnails)
-  doc.save(`batch-${batch.batch_number}-summary.pdf`)
+  doc.save('batch-' + batch.batch_number + '-summary.pdf')
 }

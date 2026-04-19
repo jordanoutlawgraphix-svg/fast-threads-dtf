@@ -159,7 +159,7 @@ export const PLACEMENT_LABELS: Record<PlacementType, string> = {
 }
 
 export const LOCATIONS: Location[] = [
-  { id: '1', name: 'Fast Threads - Montevideo', code: 'MVD' },
-  { id: '2', name: 'Fast Threads - Watertown', code: 'WTN' },
-  { id: '3', name: "Jim's Clothing - Dawson", code: 'DWS' },
+  { id: '41bfb0ef-47a3-4dbe-b744-fe50fbc3ed43', name: 'Fast Threads - Montevideo', code: 'MVD' },
+  { id: '9089288c-bf33-4446-8752-b2a49766df79', name: 'Fast Threads - Watertown', code: 'WTN' },
+  { id: '35a7a311-d45d-4868-a2eb-f5b1e1bdaa4f', name: "Jim's Clothing - Dawson", code: 'DWS' },
 ]

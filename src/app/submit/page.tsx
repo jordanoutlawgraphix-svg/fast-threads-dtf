@@ -207,11 +207,12 @@ export default function SubmitJobPage() {
 
       for (const item of items) {
         const itemId = uuidv4()
-        const ext = item.file!.name.split('.').pop() || 'png'
+        const ext = item.file!.name.split('.').pop() || 'pdf'
         const filePath = `jobs/${jobId}/${itemId}.${ext}`
 
         // Upload file to Supabase Storage
         const fileUrl = await store.uploadFile(item.file!, filePath)
+        if (!fileUrl) throw new Error(`Failed to upload file "${item.file!.name}" — check that the file is a valid PDF and try again.`)
 
         await store.createJobItem({
           id: itemId,

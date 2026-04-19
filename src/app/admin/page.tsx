@@ -1,12 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { DEFAULT_SIZE_PROFILES, PLACEMENT_LABELS, DEFAULT_GANG_SHEET_CONFIG, SizeProfile, GangSheetConfig } from '@/types'
+import { DEFAULT_SIZE_PROFILES, PLACEMENT_LABELS, SizeProfile } from '@/types'
 import * as store from '@/lib/store'
 
 export default function AdminPage() {
   const [profiles, setProfiles] = useState(DEFAULT_SIZE_PROFILES)
-  const [config, setConfig] = useState(DEFAULT_GANG_SHEET_CONFIG)
   const [saved, setSaved] = useState(false)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -18,11 +17,7 @@ export default function AdminPage() {
   const loadSettings = async () => {
     setLoading(true)
     try {
-      const [configData, profilesData] = await Promise.all([
-        store.getSetting<GangSheetConfig>('gang_sheet_config'),
-        store.getSetting<SizeProfile[]>('size_profiles'),
-      ])
-      if (configData) setConfig(configData)
+      const profilesData = await store.getSetting<SizeProfile[]>('size_profiles')
       if (profilesData) setProfiles(profilesData)
     } catch {
       // Use defaults if settings table doesn't exist yet
@@ -42,11 +37,7 @@ export default function AdminPage() {
   const handleSave = async () => {
     setSaving(true)
     try {
-      await Promise.all([
-        store.saveSetting('gang_sheet_config', config),
-        store.saveSetting('size_profiles', profiles),
-      ])
-
+      await store.saveSetting('size_profiles', profiles)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (err) {
@@ -64,50 +55,14 @@ export default function AdminPage() {
     <div className="max-w-4xl mx-auto">
       <h1 className="text-2xl font-bold mb-6">Settings</h1>
 
-      {/* Gang Sheet Config */}
+      {/* Info about NeoStampa workflow */}
       <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
-        <h2 className="font-semibold mb-4">Gang Sheet Configuration</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Printable Width (in)</label>
-            <input
-              type="number"
-              step="0.5"
-              value={config.printable_width_inches}
-              onChange={e => setConfig(prev => ({ ...prev, printable_width_inches: parseFloat(e.target.value) || 28 }))}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-orange-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">DPI</label>
-            <input
-              type="number"
-              value={config.dpi}
-              onChange={e => setConfig(prev => ({ ...prev, dpi: parseInt(e.target.value) || 300 }))}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-orange-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Item Spacing (in)</label>
-            <input
-              type="number"
-              step="0.125"
-              value={config.spacing_inches}
-              onChange={e => setConfig(prev => ({ ...prev, spacing_inches: parseFloat(e.target.value) || 0.25 }))}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-orange-500"
-            />
-          </div>
-          <div>
-            <label className="block text-sm text-gray-400 mb-1">Batch Label Height (in)</label>
-            <input
-              type="number"
-              step="0.25"
-              value={config.batch_label_height_inches}
-              onChange={e => setConfig(prev => ({ ...prev, batch_label_height_inches: parseFloat(e.target.value) || 0.5 }))}
-              className="w-full px-3 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white text-sm focus:outline-none focus:border-orange-500"
-            />
-          </div>
-        </div>
+        <h2 className="font-semibold mb-2">Print Workflow</h2>
+        <p className="text-sm text-gray-400">
+          PDFs are submitted through the app, batched, then exported as a ZIP. The DTF operator
+          loads the ZIP into NeoStampa, which handles nesting, step-and-repeat, and RIP with
+          spot color preservation. Gang sheet layout is managed entirely by NeoStampa.
+        </p>
       </div>
 
       {/* Size Profiles */}

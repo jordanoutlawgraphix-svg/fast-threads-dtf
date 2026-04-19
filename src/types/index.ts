@@ -1,6 +1,7 @@
 // ============================================
 // Fast Threads DTF Workflow Manager - Types
 // ============================================
+
 export type PlacementType =
   | 'left_chest'
   | 'full_front'
@@ -26,11 +27,13 @@ export interface SizeProfile {
   label: string
   description: string
 }
+
 export interface Location {
   id: string
   name: string
   code: string // e.g., 'MVD', 'WTN', 'DWS'
 }
+
 export interface JobSubmission {
   id: string
   invoice_number: string
@@ -43,6 +46,7 @@ export interface JobSubmission {
   is_rush: boolean
   due_date: string | null
 }
+
 export interface JobItem {
   id: string
   job_id: string
@@ -52,11 +56,14 @@ export interface JobItem {
   original_filename: string
   file_path: string
   thumbnail_path: string | null
-  // Source file dimensions (pixels)
+  // Source file dimensions. PDFs are vector — these values are the 300 DPI
+  // equivalent derived from the PDF's native point dimensions (width_inches * 300).
+  // The sizing engine treats these as pixel counts at source_dpi for validation,
+  // which works out correctly for vector input.
   source_width_px: number
   source_height_px: number
   source_dpi: number
-  // Target print dimensions (inches)
+  // Target print dimensions (inches) — what actually prints
   target_width_inches: number
   target_height_inches: number
   // Was the size auto-calculated or manually overridden?
@@ -73,10 +80,11 @@ export interface Batch {
   created_at: string
   status: BatchStatus
   total_items: number
-  gang_sheet_path: string | null
-  summary_pdf_path: string | null
+  gang_sheet_url: string | null
+  summary_pdf_url: string | null
   notes: string | null
 }
+
 export interface BatchItem {
   id: string
   batch_id: string
@@ -90,13 +98,9 @@ export interface BatchItem {
   job?: JobSubmission
 }
 
-// Gang sheet layout config
-export interface GangSheetConfig {
-  printable_width_inches: number // 28" for your setup
-  dpi: number // 300 default
-  spacing_inches: number // gap between prints
-  batch_label_height_inches: number // space for "START BATCH X" header
-}
+// NOTE: Gang sheet layout is now handled inside NeoStampa (native nesting
+// + step-and-repeat). This app stages PDFs for NeoStampa to pull; it does
+// not compute layout. The legacy GangSheetConfig type has been removed.
 
 // For the submission form
 export interface SubmissionFormData {
@@ -106,6 +110,7 @@ export interface SubmissionFormData {
   notes: string
   items: SubmissionItemData[]
 }
+
 export interface SubmissionItemData {
   file: File | null
   placement: PlacementType
@@ -141,6 +146,7 @@ export const DEFAULT_SIZE_PROFILES: Omit<SizeProfile, 'id'>[] = [
   { placement: 'custom', garment_age: 'adult', width_inches: 10, height_inches: 10, label: 'Custom (Adult)', description: 'Custom placement - set dimensions manually' },
   { placement: 'custom', garment_age: 'youth', width_inches: 7.5, height_inches: 7.5, label: 'Custom (Youth)', description: 'Custom placement youth - set dimensions manually' },
 ]
+
 export const PLACEMENT_LABELS: Record<PlacementType, string> = {
   left_chest: 'Left Chest',
   full_front: 'Full Front',
@@ -151,15 +157,9 @@ export const PLACEMENT_LABELS: Record<PlacementType, string> = {
   names: 'Names',
   custom: 'Custom',
 }
-export const LOCATIONS: Location[] = [
-  { id: '41bfb0ef-47a3-4dbe-b744-fe50fbc3ed43', name: 'Fast Threads - Montevideo', code: 'MVD' },
-  { id: '9089288c-bf33-4446-8752-b2a49766df79', name: 'Fast Threads - Watertown', code: 'WTN' },
-  { id: '35a7a311-d45d-4868-a2eb-f5b1e1bdaa4f', name: "Jim's Clothing - Dawson", code: 'DWS' },
-]
 
-export const DEFAULT_GANG_SHEET_CONFIG: GangSheetConfig = {
-  printable_width_inches: 28,
-  dpi: 300,
-  spacing_inches: 0.25,
-  batch_label_height_inches: 0.5,
-}
+export const LOCATIONS: Location[] = [
+  { id: '1', name: 'Fast Threads - Montevideo', code: 'MVD' },
+  { id: '2', name: 'Fast Threads - Watertown', code: 'WTN' },
+  { id: '3', name: "Jim's Clothing - Dawson", code: 'DWS' },
+]

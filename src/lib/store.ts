@@ -3,55 +3,65 @@
 // ============================================
 // All data operations go through Supabase.
 // File uploads go to Supabase Storage 'dtf-files' bucket.
+
 import { supabase, isSupabaseConfigured } from './supabase'
 import { JobSubmission, JobItem, Batch, BatchItem, JobStatus, BatchStatus } from '@/types'
 
 const BUCKET = 'dtf-files'
 
 // ---- Jobs ----
+
 export async function getJobs(status?: JobStatus): Promise<JobSubmission[]> {
   let query = supabase.from('jobs').select('*').order('created_at', { ascending: false })
   if (status) query = query.eq('status', status)
-const { data, error } = await query
+  const { data, error } = await query
   if (error) { console.error('getJobs error:', error); return [] }
   return data || []
 }
+
 export async function getJob(id: string): Promise<JobSubmission | null> {
   const { data, error } = await supabase.from('jobs').select('*').eq('id', id).single()
   if (error) { console.error('getJob error:', error); return null }
   return data
 }
+
 export async function createJob(job: Omit<JobSubmission, 'created_at'>): Promise<JobSubmission | null> {
   const { data, error } = await supabase.from('jobs').insert(job).select().single()
   if (error) { console.error('createJob error:', error); return null }
   return data
 }
+
 export async function updateJobStatus(id: string, status: JobStatus): Promise<void> {
   const { error } = await supabase.from('jobs').update({ status, updated_at: new Date().toISOString() }).eq('id', id)
   if (error) console.error('updateJobStatus error:', error)
 }
 
 // ---- Job Items ----
+
 export async function getJobItems(jobId: string): Promise<JobItem[]> {
   const { data, error } = await supabase.from('job_items').select('*').eq('job_id', jobId)
   if (error) { console.error('getJobItems error:', error); return [] }
   return data || []
 }
+
 export async function createJobItem(item: Omit<JobItem, 'created_at'>): Promise<JobItem | null> {
   const { data, error } = await supabase.from('job_items').insert(item).select().single()
   if (error) { console.error('createJobItem error:', error); return null }
   return data
 }
+
 export async function getUnbatchedItems(): Promise<(JobItem & { job: JobSubmission })[]> {
   // Get all job items that are NOT in any batch
-const { data: batchedIds } = await supabase.from('batch_items').select('job_item_id')
-const batchedSet = new Set((batchedIds || []).map(b => b.job_item_id))
-const { data: items, error } = await supabase
+  const { data: batchedIds } = await supabase.from('batch_items').select('job_item_id')
+  const batchedSet = new Set((batchedIds || []).map(b => b.job_item_id))
+
+  const { data: items, error } = await supabase
     .from('job_items')
     .select('*, jobs(*)')
     .order('created_at', { ascending: false })
-    if (error) { console.error('getUnbatchedItems error:', error); return [] }
-    if (!items) return []
+
+  if (error) { console.error('getUnbatchedItems error:', error); return [] }
+  if (!items) return []
 
   return items
     .filter(item => !batchedSet.has(item.id))
@@ -63,43 +73,50 @@ const { data: items, error } = await supabase
       const job = item.jobs as unknown as JobSubmission
       const { jobs: _, ...jobItem } = item
       return { ...jobItem, job } as JobItem & { job: JobSubmission }
-})
+    })
 }
 
 // ---- Batches ----
+
 export async function getBatches(status?: BatchStatus): Promise<Batch[]> {
   let query = supabase.from('batches').select('*').order('batch_number', { ascending: false })
   if (status) query = query.eq('status', status)
-const { data, error } = await query
+  const { data, error } = await query
   if (error) { console.error('getBatches error:', error); return [] }
   return data || []
 }
+
 export async function getBatch(id: string): Promise<Batch | null> {
   const { data, error } = await supabase.from('batches').select('*').eq('id', id).single()
   if (error) { console.error('getBatch error:', error); return null }
   return data
 }
+
 export async function createBatch(batch: Omit<Batch, 'batch_number' | 'created_at'>): Promise<Batch | null> {
   const { data, error } = await supabase.from('batches').insert(batch).select().single()
   if (error) { console.error('createBatch error:', error); return null }
   return data
 }
+
 export async function updateBatchStatus(id: string, status: BatchStatus): Promise<void> {
   const { error } = await supabase.from('batches').update({ status, updated_at: new Date().toISOString() }).eq('id', id)
   if (error) console.error('updateBatchStatus error:', error)
 }
 
 // ---- Batch Items ----
+
 export async function getBatchItems(batchId: string): Promise<(BatchItem & { job_item: JobItem; job: JobSubmission })[]> {
   const { data, error } = await supabase
     .from('batch_items')
     .select('*, job_items(*, jobs(*))')
     .eq('batch_id', batchId)
-    if (error) { console.error('getBatchItems error:', error); return [] }
-    if (!data) return []
+
+  if (error) { console.error('getBatchItems error:', error); return [] }
+  if (!data) return []
+
   return data.map(item => {
     const jobItem = item.job_items as unknown as (JobItem & { jobs: JobSubmission })
-const job = jobItem.jobs as unknown as JobSubmission
+    const job = jobItem.jobs as unknown as JobSubmission
     const { jobs: _, ...cleanJobItem } = jobItem as unknown as Record<string, unknown>
     return {
       id: item.id,
@@ -113,38 +130,43 @@ const job = jobItem.jobs as unknown as JobSubmission
       job_item: cleanJobItem as unknown as JobItem,
       job,
     }
-})
+  })
 }
+
 export async function createBatchItem(item: Omit<BatchItem, 'created_at'>): Promise<BatchItem | null> {
   const { data, error } = await supabase.from('batch_items').insert(item).select().single()
   if (error) { console.error('createBatchItem error:', error); return null }
   return data
 }
+
 export async function createBatchItems(items: Omit<BatchItem, 'created_at'>[]): Promise<boolean> {
   const { error } = await supabase.from('batch_items').insert(items)
   if (error) { console.error('createBatchItems error:', error); return false }
   return true
 }
+
 export async function deleteBatchItem(batchItemId: string): Promise<boolean> {
   const { error } = await supabase.from('batch_items').delete().eq('id', batchItemId)
   if (error) { console.error('deleteBatchItem error:', error); return false }
   return true
 }
+
 export async function updateBatchTotal(batchId: string, totalItems: number): Promise<void> {
   const { error } = await supabase.from('batches').update({ total_items: totalItems, updated_at: new Date().toISOString() }).eq('id', batchId)
   if (error) console.error('updateBatchTotal error:', error)
 }
+
 export async function deleteBatch(batchId: string): Promise<boolean> {
   // First get the batch items to know which jobs to revert
-const { data: items } = await supabase.from('batch_items').select('job_item_id, job_items(job_id)').eq('batch_id', batchId)
+  const { data: items } = await supabase.from('batch_items').select('job_item_id, job_items(job_id)').eq('batch_id', batchId)
 
   // Delete all batch items first
-const { error: itemsErr } = await supabase.from('batch_items').delete().eq('batch_id', batchId)
-if (itemsErr) { console.error('deleteBatch items error:', itemsErr); return false }
+  const { error: itemsErr } = await supabase.from('batch_items').delete().eq('batch_id', batchId)
+  if (itemsErr) { console.error('deleteBatch items error:', itemsErr); return false }
 
   // Delete the batch
-const { error: batchErr } = await supabase.from('batches').delete().eq('id', batchId)
-if (batchErr) { console.error('deleteBatch error:', batchErr); return false }
+  const { error: batchErr } = await supabase.from('batches').delete().eq('id', batchId)
+  if (batchErr) { console.error('deleteBatch error:', batchErr); return false }
 
   // Revert job statuses back to 'queued' so items appear in unbatched pool
   if (items && items.length > 0) {
@@ -153,77 +175,78 @@ if (batchErr) { console.error('deleteBatch error:', batchErr); return false }
       supabase.from('jobs').update({ status: 'queued', updated_at: new Date().toISOString() }).eq('id', jid)
     ))
   }
+
   return true
 }
+
+export async function deleteJobItem(jobItemId: string): Promise<boolean> {
+  // Look up file_path so we can clean up storage
+  const { data: item } = await supabase.from('job_items').select('file_path').eq('id', jobItemId).single()
+
+  // Remove any batch_items FK references first
+  await supabase.from('batch_items').delete().eq('job_item_id', jobItemId)
+
+  // Delete the job item
+  const { error } = await supabase.from('job_items').delete().eq('id', jobItemId)
+  if (error) { console.error('deleteJobItem error:', error); return false }
+
+  // Clean up storage file
+  if (item?.file_path) {
+    await supabase.storage.from(BUCKET).remove([item.file_path])
+  }
+  return true
+}
+
+export async function deleteJob(jobId: string): Promise<boolean> {
+  // Get all items for this job
+  const { data: items } = await supabase.from('job_items').select('id, file_path').eq('job_id', jobId)
+
+  if (items && items.length > 0) {
+    // Remove batch_items FK refs for all items
+    const itemIds = items.map(i => i.id)
+    await supabase.from('batch_items').delete().in('job_item_id', itemIds)
+
+    // Delete all job items
+    await supabase.from('job_items').delete().eq('job_id', jobId)
+
+    // Clean up storage files
+    const paths = items.map(i => i.file_path).filter(Boolean)
+    if (paths.length > 0) {
+      await supabase.storage.from(BUCKET).remove(paths)
+    }
+  }
+
+  // Delete the job
+  const { error } = await supabase.from('jobs').delete().eq('id', jobId)
+  if (error) { console.error('deleteJob error:', error); return false }
+  return true
+}
+
 export async function updateJobItemQuantity(jobItemId: string, quantity: number): Promise<boolean> {
   const { error } = await supabase.from('job_items').update({ quantity }).eq('id', jobItemId)
   if (error) { console.error('updateJobItemQuantity error:', error); return false }
   return true
 }
 
-export async function deleteJobItem(jobItemId: string): Promise<boolean> {
-  // Look up the file path so we can clean up storage too.
-  const { data: item } = await supabase
-    .from('job_items')
-    .select('file_path')
-    .eq('id', jobItemId)
-    .single()
-
-  // Remove any batch_items pointing at this job_item first (FK safety).
-  await supabase.from('batch_items').delete().eq('job_item_id', jobItemId)
-
-  const { error } = await supabase.from('job_items').delete().eq('id', jobItemId)
-  if (error) { console.error('deleteJobItem error:', error); return false }
-
-  if (item?.file_path) {
-    const { error: storageErr } = await supabase.storage.from(BUCKET).remove([item.file_path])
-    if (storageErr) console.warn('deleteJobItem storage cleanup warning:', storageErr)
-  }
-  return true
-}
-
-export async function deleteJob(jobId: string): Promise<boolean> {
-  // Pull every file under this job so we can wipe them in one storage call.
-  const { data: items } = await supabase
-    .from('job_items')
-    .select('id, file_path')
-    .eq('job_id', jobId)
-
-  const itemIds = (items || []).map(i => i.id)
-  if (itemIds.length > 0) {
-    await supabase.from('batch_items').delete().in('job_item_id', itemIds)
-  }
-
-  const { error: itemsErr } = await supabase.from('job_items').delete().eq('job_id', jobId)
-  if (itemsErr) { console.error('deleteJob items error:', itemsErr); return false }
-
-  const { error: jobErr } = await supabase.from('jobs').delete().eq('id', jobId)
-  if (jobErr) { console.error('deleteJob error:', jobErr); return false }
-
-  const paths = (items || []).map(i => i.file_path).filter(Boolean) as string[]
-  if (paths.length > 0) {
-    const { error: storageErr } = await supabase.storage.from(BUCKET).remove(paths)
-    if (storageErr) console.warn('deleteJob storage cleanup warning:', storageErr)
-  }
-  return true
-}
-
 // ---- File Storage ----
+
 export async function uploadFile(file: File, path: string): Promise<string | null> {
   const { error } = await supabase.storage.from(BUCKET).upload(path, file, {
     cacheControl: '3600',
     upsert: true,
   })
   if (error) { console.error('uploadFile error:', error); return null }
-const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path)
-return urlData.publicUrl
+  const { data: urlData } = supabase.storage.from(BUCKET).getPublicUrl(path)
+  return urlData.publicUrl
 }
+
 export function getFileUrl(path: string): string {
   const { data } = supabase.storage.from(BUCKET).getPublicUrl(path)
   return data.publicUrl
 }
 
 // ---- Stats ----
+
 export async function getStats() {
   const [
     { count: totalJobs },
@@ -240,12 +263,12 @@ export async function getStats() {
   ])
 
   // Count items in printed/complete batches
-const { data: printedBatchIds } = await supabase
+  const { data: printedBatchIds } = await supabase
     .from('batches')
     .select('id')
     .in('status', ['printed', 'complete'])
-const ids = (printedBatchIds || []).map(b => b.id)
-let totalItemsPrinted = 0
+  const ids = (printedBatchIds || []).map(b => b.id)
+  let totalItemsPrinted = 0
   if (ids.length > 0) {
     const { count } = await supabase
       .from('batch_items')
@@ -253,6 +276,7 @@ let totalItemsPrinted = 0
       .in('batch_id', ids)
     totalItemsPrinted = count || 0
   }
+
   return {
     totalJobs: totalJobs || 0,
     pendingJobs: pendingJobs || 0,
@@ -264,11 +288,13 @@ let totalItemsPrinted = 0
 }
 
 // ---- Settings ----
+
 export async function getSetting<T>(key: string): Promise<T | null> {
   const { data, error } = await supabase.from('settings').select('value').eq('key', key).single()
   if (error || !data) return null
   return data.value as T
 }
+
 export async function saveSetting<T>(key: string, value: T): Promise<void> {
   const { error } = await supabase.from('settings').upsert({
     key,
@@ -287,7 +313,10 @@ export async function submitFeedback(feedback: {
   page: string
   user_agent: string
 }): Promise<void> {
-  const { error } = await supabase.from('feedback').insert(feedback)
+  const { error } = await supabase.from('feedback').insert({
+    ...feedback,
+    created_at: new Date().toISOString(),
+  })
   if (error) console.error('submitFeedback error:', error)
 }
 

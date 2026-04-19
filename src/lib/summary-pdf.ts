@@ -162,7 +162,7 @@ export function generateBatchSummaryPDF(
     doc.setFontSize(10)
     doc.setFont('helvetica', 'bold')
     doc.text(
-      `BATCH #${batch.batch_number} — ${batch.total_items} TOTAL PRINTS — Match this sheet to your gang sheet output`,
+      `BATCH #${batch.batch_number} — ${batch.total_items} TOTAL PRINTS — Match this sheet to your NeoStampa output`,
       pageWidth / 2,
       pageH - 35,
       { align: 'center' }

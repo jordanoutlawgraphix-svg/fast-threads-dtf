@@ -314,5 +314,19 @@ export async function saveSetting<T>(key: string, value: T): Promise<void> {
   if (error) console.error('saveSetting error:', error)
 }
 
+
+export async function submitFeedback(feedback: {
+  type: string
+  message: string
+  submitter_name: string
+  page: string
+  user_agent: string
+}): Promise<void> {
+  const { error } = await supabase.from('feedback').insert({
+    ...feedback,
+    created_at: new Date().toISOString(),
+  })
+  if (error) console.error('submitFeedback error:', error)
+}
 // Re-export config check
 export { isSupabaseConfigured }

@@ -228,6 +228,16 @@ export async function updateJobItemQuantity(jobItemId: string, quantity: number)
   return true
 }
 
+export async function updateJobItemSize(jobItemId: string, width: number, height: number): Promise<boolean> {
+  const { error } = await supabase.from('job_items').update({
+    target_width_inches: width,
+    target_height_inches: height,
+    size_confirmed: false,
+  }).eq('id', jobItemId)
+  if (error) { console.error('updateJobItemSize error:', error); return false }
+  return true
+}
+
 // ---- File Storage ----
 
 export async function uploadFile(file: File, path: string): Promise<string | null> {
@@ -302,22 +312,6 @@ export async function saveSetting<T>(key: string, value: T): Promise<void> {
     updated_at: new Date().toISOString(),
   }, { onConflict: 'key' })
   if (error) console.error('saveSetting error:', error)
-}
-
-// ---- Feedback ----
-
-export async function submitFeedback(feedback: {
-  type: string
-  message: string
-  submitter_name: string
-  page: string
-  user_agent: string
-}): Promise<void> {
-  const { error } = await supabase.from('feedback').insert({
-    ...feedback,
-    created_at: new Date().toISOString(),
-  })
-  if (error) console.error('submitFeedback error:', error)
 }
 
 // Re-export config check

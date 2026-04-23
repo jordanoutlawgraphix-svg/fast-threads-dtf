@@ -13,6 +13,10 @@ export default function QueuePage() {
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({})
   const [confirmDeleteItem, setConfirmDeleteItem] = useState<string | null>(null)
   const [confirmDeleteJob, setConfirmDeleteJob] = useState<string | null>(null)
+  const [editingItem, setEditingItem] = useState<string | null>(null)
+  const [editQty, setEditQty] = useState<number>(1)
+  const [editWidth, setEditWidth] = useState<number>(0)
+  const [editHeight, setEditHeight] = useState<number>(0)
 
   useEffect(() => { refreshData() }, [])
 
@@ -63,6 +67,40 @@ export default function QueuePage() {
     setJobItems(prev => { const next = { ...prev }; delete next[jobId]; return next })
     setExpandedJob(null)
     setConfirmDeleteJob(null)
+  }
+
+  const startEditing = (item: JobItem) => {
+    setEditingItem(item.id)
+    setEditQty(item.quantity)
+    setEditWidth(item.target_width_inches)
+    setEditHeight(item.target_height_inches)
+  }
+
+  const handleSaveEdit = async (jobId: string, item: JobItem) => {
+    const qtyChanged = editQty !== item.quantity
+    const sizeChanged = editWidth !== item.target_width_inches || editHeight !== item.target_height_inches
+    if (qtyChanged) await store.updateJobItemQuantity(item.id, editQty)
+    if (sizeChanged) await store.updateJobItemSize(item.id, editWidth, editHeight)
+    // Update local state
+    setJobItems(prev => ({
+      ...prev,
+      [jobId]: (prev[jobId] || []).map(i =>
+        i.id === item.id ? { ...i, quantity: editQty, target_width_inches: editWidth, target_height_inches: editHeight } : i
+      )
+    }))
+    setEditingItem(null)
+  }
+
+  const handleEditWidthChange = (newWidth: number, item: JobItem) => {
+    setEditWidth(newWidth)
+    const aspect = item.source_width_px / item.source_height_px
+    if (aspect > 0) setEditHeight(Math.round((newWidth / aspect) * 100) / 100)
+  }
+
+  const handleEditHeightChange = (newHeight: number, item: JobItem) => {
+    setEditHeight(newHeight)
+    const aspect = item.source_width_px / item.source_height_px
+    if (aspect > 0) setEditWidth(Math.round((newHeight * aspect) * 100) / 100)
   }
 
   const statusColors: Record<string, string> = {
@@ -152,28 +190,64 @@ export default function QueuePage() {
                           )}
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium truncate">{item.original_filename}</p>
-                            <p className="text-xs text-gray-400 mt-1">
-                              {PLACEMENT_LABELS[item.placement]}{item.custom_placement_name ? ` (${item.custom_placement_name})` : ''}{' | '}
-                              {item.garment_age === 'youth' ? 'Youth' : 'Adult'}{' | '}{item.target_width_inches}&quot; x {item.target_height_inches}&quot;
-                            </p>
+                            {editingItem === item.id ? (
+                              <div className="flex flex-wrap items-center gap-2 mt-2">
+                                <span className="text-xs text-gray-500">{PLACEMENT_LABELS[item.placement]} | {item.garment_age === 'youth' ? 'Youth' : 'Adult'}</span>
+                                <div className="flex items-center gap-1">
+                                  <label className="text-xs text-gray-500">W:</label>
+                                  <input type="number" step="0.25" min="0.5" value={editWidth}
+                                    onChange={e => handleEditWidthChange(parseFloat(e.target.value) || 0, item)}
+                                    className="w-16 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs" />
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <label className="text-xs text-gray-500">H:</label>
+                                  <input type="number" step="0.25" min="0.5" value={editHeight}
+                                    onChange={e => handleEditHeightChange(parseFloat(e.target.value) || 0, item)}
+                                    className="w-16 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs" />
+                                </div>
+                                <div className="flex items-center gap-1">
+                                  <label className="text-xs text-gray-500">Qty:</label>
+                                  <input type="number" min={1} value={editQty}
+                                    onChange={e => setEditQty(Math.max(1, parseInt(e.target.value) || 1))}
+                                    className="w-14 px-1 py-0.5 bg-gray-700 border border-gray-600 rounded text-white text-xs" />
+                                </div>
+                                <button onClick={() => handleSaveEdit(job.id, item)}
+                                  className="px-2 py-0.5 bg-orange-500 text-white rounded text-xs hover:bg-orange-600">Save</button>
+                                <button onClick={() => setEditingItem(null)}
+                                  className="px-2 py-0.5 bg-gray-700 text-gray-300 rounded text-xs hover:bg-gray-600">Cancel</button>
+                              </div>
+                            ) : (
+                              <p className="text-xs text-gray-400 mt-1">
+                                {PLACEMENT_LABELS[item.placement]}{item.custom_placement_name ? ` (${item.custom_placement_name})` : ''}{' | '}
+                                {item.garment_age === 'youth' ? 'Youth' : 'Adult'}{' | '}{item.target_width_inches}&quot; x {item.target_height_inches}&quot;
+                              </p>
+                            )}
                           </div>
                           <div className="text-right flex items-center gap-3">
-                            <div>
-                              <p className="text-lg font-bold">{item.quantity}</p>
-                              <p className="text-xs text-gray-500">qty</p>
-                            </div>
-                            {['submitted', 'reviewed', 'queued'].includes(job.status) && (
-                              isDeleting ? (
-                                <div className="flex flex-col gap-1">
-                                  <button onClick={() => handleDeleteItem(job.id, item.id)} className="px-2 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">Delete</button>
-                                  <button onClick={() => setConfirmDeleteItem(null)} className="px-2 py-1 bg-gray-700 text-gray-300 rounded text-xs hover:bg-gray-600">Cancel</button>
-                                </div>
-                              ) : (
-                                <button onClick={() => setConfirmDeleteItem(item.id)}
-                                  className="px-2 py-1 text-red-400/60 hover:text-red-400 text-xs hover:bg-red-900/20 rounded transition-colors">
-                                  Delete
+                            {editingItem !== item.id && (
+                              <div>
+                                <p className="text-lg font-bold">{item.quantity}</p>
+                                <p className="text-xs text-gray-500">qty</p>
+                              </div>
+                            )}
+                            {['submitted', 'reviewed', 'queued'].includes(job.status) && editingItem !== item.id && (
+                              <div className="flex flex-col gap-1">
+                                <button onClick={() => startEditing(item)}
+                                  className="px-2 py-1 text-orange-400/80 hover:text-orange-400 text-xs hover:bg-orange-900/20 rounded transition-colors">
+                                  Edit
                                 </button>
-                              )
+                                {isDeleting ? (
+                                  <>
+                                    <button onClick={() => handleDeleteItem(job.id, item.id)} className="px-2 py-1 bg-red-600 text-white rounded text-xs font-medium hover:bg-red-700">Delete</button>
+                                    <button onClick={() => setConfirmDeleteItem(null)} className="px-2 py-1 bg-gray-700 text-gray-300 rounded text-xs hover:bg-gray-600">Cancel</button>
+                                  </>
+                                ) : (
+                                  <button onClick={() => setConfirmDeleteItem(item.id)}
+                                    className="px-2 py-1 text-red-400/60 hover:text-red-400 text-xs hover:bg-red-900/20 rounded transition-colors">
+                                    Delete
+                                  </button>
+                                )}
+                              </div>
                             )}
                           </div>
                         </div>

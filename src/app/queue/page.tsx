@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import * as store from '@/lib/store'
-import { JobSubmission, JobItem, PLACEMENT_LABELS } from '@/types'
+import { JobSubmission, JobItem, PLACEMENT_LABELS, LOCATIONS } from '@/types'
 import { renderPdfThumbnailFromUrl } from '@/lib/pdf-utils'
 
 export default function QueuePage() {
@@ -17,6 +17,8 @@ export default function QueuePage() {
   const [editQty, setEditQty] = useState<number>(1)
   const [editWidth, setEditWidth] = useState<number>(0)
   const [editHeight, setEditHeight] = useState<number>(0)
+  const [editingJobLocation, setEditingJobLocation] = useState<string | null>(null)
+  const [editLocationId, setEditLocationId] = useState<string>('')
 
   useEffect(() => { refreshData() }, [])
 
@@ -97,6 +99,24 @@ export default function QueuePage() {
     if (aspect > 0) setEditHeight(Math.round((newWidth / aspect) * 100) / 100)
   }
 
+  const startEditingLocation = (job: JobSubmission) => {
+    setEditingJobLocation(job.id)
+    setEditLocationId(job.location_id)
+  }
+
+  const handleSaveLocation = async (job: JobSubmission) => {
+    const loc = LOCATIONS.find(l => l.id === editLocationId)
+    if (!loc || loc.id === job.location_id) {
+      setEditingJobLocation(null)
+      return
+    }
+    await store.updateJobLocation(job.id, loc.id, loc.code)
+    setJobs(prev => prev.map(j =>
+      j.id === job.id ? { ...j, location_id: loc.id, location_code: loc.code } : j
+    ))
+    setEditingJobLocation(null)
+  }
+
   const handleEditHeightChange = (newHeight: number, item: JobItem) => {
     setEditHeight(newHeight)
     const aspect = item.source_width_px / item.source_height_px
@@ -137,10 +157,34 @@ export default function QueuePage() {
                   className="flex-1 p-4 flex items-center justify-between hover:bg-gray-800/50 transition-colors text-left">
                   <div className="flex items-center gap-4">
                     <span className={`px-2 py-1 rounded text-xs font-medium ${statusColors[job.status]}`}>{job.status.toUpperCase()}</span>
-                    <div>
+                    <div className="flex items-center">
                       <span className="font-semibold">#{job.invoice_number}</span>
                       <span className="text-gray-500 mx-2">|</span>
-                      <span className="text-sm text-gray-400">{job.location_code}</span>
+                      {editingJobLocation === job.id ? (
+                        <span className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                          <select
+                            value={editLocationId}
+                            onChange={e => setEditLocationId(e.target.value)}
+                            className="px-1.5 py-0.5 bg-gray-700 border border-gray-600 rounded text-sm text-white"
+                          >
+                            {LOCATIONS.map(loc => (
+                              <option key={loc.id} value={loc.id}>{loc.code} — {loc.name}</option>
+                            ))}
+                          </select>
+                          <button onClick={(e) => { e.stopPropagation(); handleSaveLocation(job) }}
+                            className="px-2 py-0.5 bg-orange-500 text-white rounded text-xs hover:bg-orange-600">Save</button>
+                          <button onClick={(e) => { e.stopPropagation(); setEditingJobLocation(null) }}
+                            className="px-2 py-0.5 bg-gray-700 text-gray-300 rounded text-xs hover:bg-gray-600">Cancel</button>
+                        </span>
+                      ) : (
+                        <span
+                          className={`text-sm ${['submitted', 'reviewed', 'queued'].includes(job.status) ? 'text-orange-400/80 hover:text-orange-400 cursor-pointer' : 'text-gray-400'}`}
+                          onClick={['submitted', 'reviewed', 'queued'].includes(job.status) ? (e) => { e.stopPropagation(); startEditingLocation(job) } : undefined}
+                          title={['submitted', 'reviewed', 'queued'].includes(job.status) ? 'Click to change location' : undefined}
+                        >
+                          {job.location_code}
+                        </span>
+                      )}
                       <span className="text-gray-500 mx-2">|</span>
                       <span className="text-sm text-gray-400">{job.submitter_name}</span>
                     </div>

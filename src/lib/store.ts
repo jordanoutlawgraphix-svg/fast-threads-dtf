@@ -222,6 +222,16 @@ export async function deleteJob(jobId: string): Promise<boolean> {
   return true
 }
 
+export async function updateJobLocation(jobId: string, locationId: string, locationCode: string): Promise<boolean> {
+  const { error } = await supabase.from('jobs').update({
+    location_id: locationId,
+    location_code: locationCode,
+    updated_at: new Date().toISOString(),
+  }).eq('id', jobId)
+  if (error) { console.error('updateJobLocation error:', error); return false }
+  return true
+}
+
 export async function updateJobItemQuantity(jobItemId: string, quantity: number): Promise<boolean> {
   const { error } = await supabase.from('job_items').update({ quantity }).eq('id', jobItemId)
   if (error) { console.error('updateJobItemQuantity error:', error); return false }

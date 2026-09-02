@@ -72,6 +72,9 @@ export interface JobItem {
   // Custom placement name (only if placement === 'custom')
   custom_placement_name: string | null
   notes: string | null
+  // Explicitly retired from the unbatched pool by an operator (e.g. the work
+  // was handled outside the app). Deliberate — never set as a side effect.
+  archived?: boolean
 }
 
 export interface Batch {

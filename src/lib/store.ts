@@ -67,8 +67,11 @@ export async function getUnbatchedItems(): Promise<(JobItem & { job: JobSubmissi
   // deliberately do NOT gate on job.status here: an item that isn't in any
   // batch has never been printed, so it must stay visible regardless of what
   // status its parent job happens to carry.
+  // The one exception is `archived`, which an operator sets explicitly to
+  // retire an item that was handled outside the app.
   return items
     .filter(item => !batchedSet.has(item.id))
+    .filter(item => !item.archived)
     .map(item => {
       const job = item.jobs as unknown as JobSubmission
       const { jobs: _, ...jobItem } = item
@@ -257,7 +260,10 @@ export async function updateJobItemSize(jobItemId: string, width: number, height
  */
 export async function syncJobStatuses(jobIds: string[]): Promise<void> {
   await Promise.all(jobIds.map(async (jobId) => {
-    const { data: items } = await supabase.from('job_items').select('id').eq('job_id', jobId)
+    // Archived items are intentionally retired and don't count toward whether
+    // the job is fully batched.
+    const { data: items } = await supabase
+      .from('job_items').select('id').eq('job_id', jobId).eq('archived', false)
     if (!items || items.length === 0) return
 
     const itemIds = items.map(i => i.id)
@@ -283,7 +289,10 @@ export async function syncJobStatuses(jobIds: string[]): Promise<void> {
  */
 export async function syncJobCompletion(jobIds: string[]): Promise<void> {
   await Promise.all(jobIds.map(async (jobId) => {
-    const { data: items } = await supabase.from('job_items').select('id').eq('job_id', jobId)
+    // Archived items are intentionally retired and don't count toward whether
+    // the job is fully batched.
+    const { data: items } = await supabase
+      .from('job_items').select('id').eq('job_id', jobId).eq('archived', false)
     if (!items || items.length === 0) return
 
     const itemIds = items.map(i => i.id)

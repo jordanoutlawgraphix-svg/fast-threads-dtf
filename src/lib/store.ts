@@ -63,12 +63,12 @@ export async function getUnbatchedItems(): Promise<(JobItem & { job: JobSubmissi
   if (error) { console.error('getUnbatchedItems error:', error); return [] }
   if (!items) return []
 
+  // Batch membership is the single source of truth for "unbatched". We
+  // deliberately do NOT gate on job.status here: an item that isn't in any
+  // batch has never been printed, so it must stay visible regardless of what
+  // status its parent job happens to carry.
   return items
     .filter(item => !batchedSet.has(item.id))
-    .filter(item => {
-      const job = item.jobs as unknown as JobSubmission
-      return job && ['submitted', 'reviewed', 'queued'].includes(job.status)
-    })
     .map(item => {
       const job = item.jobs as unknown as JobSubmission
       const { jobs: _, ...jobItem } = item
@@ -168,12 +168,10 @@ export async function deleteBatch(batchId: string): Promise<boolean> {
   const { error: batchErr } = await supabase.from('batches').delete().eq('id', batchId)
   if (batchErr) { console.error('deleteBatch error:', batchErr); return false }
 
-  // Revert job statuses back to 'queued' so items appear in unbatched pool
+  // Recalculate affected job statuses from remaining batch membership
   if (items && items.length > 0) {
     const jobIds = new Set(items.map(i => (i.job_items as unknown as { job_id: string })?.job_id).filter(Boolean))
-    await Promise.all(Array.from(jobIds).map(jid =>
-      supabase.from('jobs').update({ status: 'queued', updated_at: new Date().toISOString() }).eq('id', jid)
-    ))
+    await syncJobStatuses(Array.from(jobIds) as string[])
   }
 
   return true
@@ -246,6 +244,72 @@ export async function updateJobItemSize(jobItemId: string, width: number, height
   }).eq('id', jobItemId)
   if (error) { console.error('updateJobItemSize error:', error); return false }
   return true
+}
+
+// ---- Job Status Sync ----
+
+/**
+ * Recalculate a job's status from the actual batch membership of its items.
+ *
+ * A job is only 'batched' when EVERY one of its items sits in a batch. If any
+ * item is still unbatched, the job goes back to 'queued' so those leftover
+ * items keep showing up in the unbatched pool.
+ */
+export async function syncJobStatuses(jobIds: string[]): Promise<void> {
+  await Promise.all(jobIds.map(async (jobId) => {
+    const { data: items } = await supabase.from('job_items').select('id').eq('job_id', jobId)
+    if (!items || items.length === 0) return
+
+    const itemIds = items.map(i => i.id)
+    const { data: batched } = await supabase
+      .from('batch_items')
+      .select('job_item_id')
+      .in('job_item_id', itemIds)
+
+    const batchedSet = new Set((batched || []).map(b => b.job_item_id))
+    const allBatched = itemIds.every(id => batchedSet.has(id))
+
+    const { error } = await supabase.from('jobs').update({
+      status: allBatched ? 'batched' : 'queued',
+      updated_at: new Date().toISOString(),
+    }).eq('id', jobId)
+    if (error) console.error('syncJobStatuses error:', error)
+  }))
+}
+
+/**
+ * Mark a job 'complete' only when every one of its items is batched AND every
+ * batch holding those items is printed/complete.
+ */
+export async function syncJobCompletion(jobIds: string[]): Promise<void> {
+  await Promise.all(jobIds.map(async (jobId) => {
+    const { data: items } = await supabase.from('job_items').select('id').eq('job_id', jobId)
+    if (!items || items.length === 0) return
+
+    const itemIds = items.map(i => i.id)
+    const { data: batched } = await supabase
+      .from('batch_items')
+      .select('job_item_id, batches(status)')
+      .in('job_item_id', itemIds)
+
+    const rows = batched || []
+    const batchedSet = new Set(rows.map(b => b.job_item_id))
+    const allBatched = itemIds.every(id => batchedSet.has(id))
+
+    const allDone = allBatched && rows.every(r => {
+      const status = (r.batches as unknown as { status: string } | null)?.status
+      return status === 'printed' || status === 'complete'
+    })
+
+    if (allDone) {
+      await supabase.from('jobs').update({
+        status: 'complete',
+        updated_at: new Date().toISOString(),
+      }).eq('id', jobId)
+    } else {
+      await syncJobStatuses([jobId])
+    }
+  }))
 }
 
 // ---- File Storage ----

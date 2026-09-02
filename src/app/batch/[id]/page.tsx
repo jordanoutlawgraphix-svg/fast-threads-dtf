@@ -59,8 +59,11 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
   const markAsComplete = async () => {
     await store.updateBatchStatus(id, 'complete')
     setBatch(prev => prev ? { ...prev, status: 'complete' } : null)
+    // Only mark a job complete when every one of its items is batched and all
+    // those batches are done — otherwise it falls back to batched/queued so
+    // leftover items aren't stranded.
     const jobIds = new Set(batchItems.map(bi => bi.job.id))
-    await Promise.all(Array.from(jobIds).map(jid => store.updateJobStatus(jid, 'complete')))
+    await store.syncJobCompletion(Array.from(jobIds))
   }
 
   // ---- Edit / Delete handlers ----
@@ -123,10 +126,7 @@ export default function BatchDetailPage({ params }: { params: Promise<{ id: stri
 
     const deletedJobId = toDelete[0]?.job?.id
     if (deletedJobId) {
-      const otherItemsInBatch = remaining.some(bi => bi.job.id === deletedJobId)
-      if (!otherItemsInBatch) {
-        await store.updateJobStatus(deletedJobId, 'queued')
-      }
+      await store.syncJobStatuses([deletedJobId])
     }
   }
 

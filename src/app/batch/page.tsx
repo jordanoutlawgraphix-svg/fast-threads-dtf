@@ -81,9 +81,11 @@ export default function BatchPage() {
       }))
       await store.createBatchItems(batchItemsToInsert)
 
-      // Mark jobs as batched
+      // Recalculate job status from actual batch membership. A job only becomes
+      // 'batched' once ALL of its items are in a batch — partially batched jobs
+      // stay 'queued' so their leftover items remain visible in the pool.
       const jobIds = new Set(selected.map(i => i.job_id))
-      await Promise.all(Array.from(jobIds).map(jid => store.updateJobStatus(jid, 'batched')))
+      await store.syncJobStatuses(Array.from(jobIds))
 
       setSelectedItems(new Set())
       await refreshData()

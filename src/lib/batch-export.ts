@@ -35,6 +35,78 @@ export function buildRollFilename(
 }
 
 /**
+ * Build a structured filename for a job item outside of any batch context.
+ * Same convention as buildRollFilename minus the batch prefix, so reprints
+ * are still unambiguous in NeoStampa.
+ *
+ *   {invoice#}_{placement}_{Adult|Youth}_{W}x{H}_qty{n}.pdf
+ */
+export function buildJobFilename(job: JobSubmission, item: JobItem): string {
+  const placement = PLACEMENT_LABELS[item.placement]
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+  const age = item.garment_age === 'youth' ? 'Youth' : 'Adult'
+  return `${job.invoice_number}_${placement}_${age}_${item.target_width_inches}x${item.target_height_inches}_qty${item.quantity}.pdf`
+}
+
+function triggerDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+/**
+ * Download a single job item's PDF, named with the structured convention.
+ * Used for reprints and color corrections where only one file is needed.
+ */
+export async function downloadSingleFile(
+  job: JobSubmission,
+  item: JobItem,
+  fetchPdf: (jobItem: JobItem) => Promise<Blob>,
+): Promise<void> {
+  const blob = await fetchPdf(item)
+  triggerDownload(blob, buildJobFilename(job, item))
+}
+
+/**
+ * Download every file on a job as a zip. Works regardless of whether the job
+ * has been batched or printed — useful for reprinting a whole order.
+ */
+export async function downloadJobZip(
+  job: JobSubmission,
+  items: JobItem[],
+  fetchPdf: (jobItem: JobItem) => Promise<Blob>,
+): Promise<void> {
+  const zip = new JSZip()
+  const usedNames = new Set<string>()
+
+  for (const item of items) {
+    let name = buildJobFilename(job, item)
+    if (usedNames.has(name)) {
+      let suffix = 2
+      while (usedNames.has(name.replace(/\.pdf$/, `_${suffix}.pdf`))) suffix++
+      name = name.replace(/\.pdf$/, `_${suffix}.pdf`)
+    }
+    usedNames.add(name)
+
+    try {
+      zip.file(name, await fetchPdf(item))
+    } catch (err) {
+      console.error(`Failed to fetch PDF for ${item.original_filename}:`, err)
+      // Keep going so the operator still gets the files that did resolve
+    }
+  }
+
+  const zipBlob = await zip.generateAsync({ type: 'blob' })
+  triggerDownload(zipBlob, `Invoice-${job.invoice_number}-Files.zip`)
+}
+
+/**
  * Generate the zip and trigger a download in the browser.
  *
  * @param batch         The batch record

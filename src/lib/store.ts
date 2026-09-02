@@ -36,6 +36,50 @@ export async function updateJobStatus(id: string, status: JobStatus): Promise<vo
   if (error) console.error('updateJobStatus error:', error)
 }
 
+/**
+ * Search jobs by invoice number across EVERY status - including batched,
+ * printed and complete. The normal queue view hides finished work, but
+ * reprints and color corrections need to reach it, so search deliberately
+ * does not filter on status.
+ */
+export async function searchJobsByInvoice(query: string): Promise<JobSubmission[]> {
+  const q = query.trim()
+  if (!q) return []
+  const { data, error } = await supabase
+    .from('jobs')
+    .select('*')
+    .ilike('invoice_number', `%${q}%`)
+    .order('created_at', { ascending: false })
+    .limit(100)
+  if (error) { console.error('searchJobsByInvoice error:', error); return [] }
+  return data || []
+}
+
+/**
+ * Map job_item_id -> batch numbers it appears in, so the UI can show where a
+ * file was printed. An item can legitimately appear in more than one batch
+ * if it was reprinted.
+ */
+export async function getBatchNumbersForItems(itemIds: string[]): Promise<Record<string, number[]>> {
+  if (itemIds.length === 0) return {}
+  const { data, error } = await supabase
+    .from('batch_items')
+    .select('job_item_id, batches(batch_number)')
+    .in('job_item_id', itemIds)
+  if (error) { console.error('getBatchNumbersForItems error:', error); return {} }
+
+  const map: Record<string, number[]> = {}
+  for (const row of data || []) {
+    const num = (row.batches as unknown as { batch_number: number } | null)?.batch_number
+    if (num == null) continue
+    const key = row.job_item_id as string
+    if (!map[key]) map[key] = []
+    if (!map[key].includes(num)) map[key].push(num)
+  }
+  for (const key of Object.keys(map)) map[key].sort((a, b) => a - b)
+  return map
+}
+
 // ---- Job Items ----
 
 export async function getJobItems(jobId: string): Promise<JobItem[]> {

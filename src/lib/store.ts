@@ -51,32 +51,21 @@ export async function createJobItem(item: Omit<JobItem, 'created_at'>): Promise<
 }
 
 export async function getUnbatchedItems(): Promise<(JobItem & { job: JobSubmission })[]> {
-  // Get all job items that are NOT in any batch
-  const { data: batchedIds } = await supabase.from('batch_items').select('job_item_id')
-  const batchedSet = new Set((batchedIds || []).map(b => b.job_item_id))
-
-  const { data: items, error } = await supabase
-    .from('job_items')
-    .select('*, jobs(*)')
-    .order('created_at', { ascending: false })
-
+  // Computed in Postgres (see the get_unbatched_items migration).
+  //
+  // This used to fetch every batch_item into the browser and diff client-side.
+  // That broke silently once batch_items passed the 1000-row response cap:
+  // batched items fell outside the fetched page, so the set of "already
+  // batched" ids was incomplete and hundreds of printed items reappeared in
+  // the pool. Doing the anti-join in the database removes the row-cap
+  // exposure entirely — only the small result set crosses the wire.
+  //
+  // Batch membership is the source of truth for "unbatched"; job.status is
+  // deliberately NOT consulted, since an item that isn't in a batch has never
+  // been printed. `archived` is the one explicit operator override.
+  const { data, error } = await supabase.rpc('get_unbatched_items')
   if (error) { console.error('getUnbatchedItems error:', error); return [] }
-  if (!items) return []
-
-  // Batch membership is the single source of truth for "unbatched". We
-  // deliberately do NOT gate on job.status here: an item that isn't in any
-  // batch has never been printed, so it must stay visible regardless of what
-  // status its parent job happens to carry.
-  // The one exception is `archived`, which an operator sets explicitly to
-  // retire an item that was handled outside the app.
-  return items
-    .filter(item => !batchedSet.has(item.id))
-    .filter(item => !item.archived)
-    .map(item => {
-      const job = item.jobs as unknown as JobSubmission
-      const { jobs: _, ...jobItem } = item
-      return { ...jobItem, job } as JobItem & { job: JobSubmission }
-    })
+  return (data || []) as (JobItem & { job: JobSubmission })[]
 }
 
 // ---- Batches ----
